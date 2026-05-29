@@ -1,57 +1,89 @@
 import { useState } from 'react';
-import Ticker from './components/layout/Ticker';
 import Header from './components/layout/Header';
-import HeroCarousel from './components/hero/HeroCarousel';
 import SportSection from './components/sports/SportSection';
-import type { SportId } from './types/news';
-import { SPORTS } from './constants/sports';
+import SportPicker from './components/onboarding/SportPicker';
+import TeamPicker from './components/onboarding/TeamPicker';
+import type { SportId, Prefs } from './types/news';
 
-const API_KEY = import.meta.env.VITE_NEWS_API_KEY;
+const STORAGE_KEY = 'prefs';
 
-function NoApiKeyBanner() {
-  return (
-    <div className="bg-yellow-900/30 border border-yellow-700 text-yellow-300 px-6 py-4 text-sm font-inter">
-      <strong className="font-oswald uppercase tracking-wide">Setup required:</strong>{' '}
-      Add your NewsAPI key to a <code className="bg-black/30 px-1 rounded">.env</code> file as{' '}
-      <code className="bg-black/30 px-1 rounded">VITE_NEWS_API_KEY=your_key</code>.
-      Get a free key at{' '}
-      <a
-        href="https://newsapi.org"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="underline hover:text-yellow-100"
-      >
-        newsapi.org
-      </a>
-      , then restart the dev server.
-    </div>
-  );
+function loadPrefs(): Prefs | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
+function savePrefs(prefs: Prefs) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+}
+
+type Step = 'pick-sports' | 'pick-teams' | 'main';
+
 export default function App() {
+  const [prefs, setPrefs] = useState<Prefs | null>(loadPrefs);
+  const [step, setStep] = useState<Step>(() => (loadPrefs() ? 'main' : 'pick-sports'));
+  const [pendingSports, setPendingSports] = useState<SportId[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('all');
 
+  function handleSportsConfirm(sports: SportId[]) {
+    setPendingSports(sports);
+    setStep('pick-teams');
+  }
+
+  function handleTeamsConfirm(teams: Prefs['teams']) {
+    const newPrefs: Prefs = { sports: pendingSports, teams };
+    savePrefs(newPrefs);
+    setPrefs(newPrefs);
+    setStep('main');
+    setActiveFilter('all');
+  }
+
+  function handleEdit() {
+    setPendingSports(prefs?.sports ?? []);
+    setStep('pick-sports');
+  }
+
+  if (step === 'pick-sports') {
+    return (
+      <SportPicker
+        onConfirm={handleSportsConfirm}
+        initial={prefs?.sports ?? []}
+      />
+    );
+  }
+
+  if (step === 'pick-teams') {
+    return (
+      <TeamPicker
+        sports={pendingSports}
+        initialTeams={prefs?.teams ?? {}}
+        onConfirm={handleTeamsConfirm}
+        onBack={() => setStep('pick-sports')}
+      />
+    );
+  }
+
+  const sports = prefs!.sports;
   const visibleSports = activeFilter === 'all'
-    ? SPORTS.map((s) => s.id as SportId)
-    : [activeFilter as SportId];
+    ? sports
+    : sports.includes(activeFilter as SportId)
+      ? [activeFilter as SportId]
+      : sports;
 
   return (
     <div className="min-h-screen bg-espn-dark font-inter">
-      {/* Breaking news ticker */}
-      <Ticker />
+      <Header
+        activeFilter={activeFilter}
+        onFilter={setActiveFilter}
+        selectedSports={sports}
+        onEditSports={handleEdit}
+      />
 
-      {/* Sticky header */}
-      <Header activeFilter={activeFilter} onFilter={setActiveFilter} />
-
-      {/* API key warning */}
-      {!API_KEY && <NoApiKeyBanner />}
-
-      {/* Hero carousel */}
-      {(activeFilter === 'all') && <HeroCarousel />}
-
-      {/* Sport sections */}
       <main className="max-w-7xl mx-auto px-4 pb-16">
-        {(activeFilter === 'all') && (
+        {activeFilter === 'all' && (
           <div className="pt-6 pb-2">
             <div className="flex items-center gap-2 mb-0">
               <div className="h-px flex-1 bg-espn-border" />
@@ -63,11 +95,14 @@ export default function App() {
           </div>
         )}
         {visibleSports.map((sportId) => (
-          <SportSection key={sportId} sportId={sportId} />
+          <SportSection
+            key={sportId}
+            sportId={sportId}
+            teamIds={prefs!.teams[sportId] ?? []}
+          />
         ))}
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-espn-border py-6 text-center text-gray-600 text-xs font-inter">
         <p>
           Powered by{' '}

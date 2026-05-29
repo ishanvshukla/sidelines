@@ -13,6 +13,11 @@ export default {
         'sport-tennis': '#4ade80',
         'sport-basketball': '#f97316',
         'sport-cricket': '#3b82f6',
+        'sport-soccer': '#22c55e',
+        'sport-nfl': '#8b5cf6',
+        'sport-ncaa-basketball': '#fbbf24',
+        'sport-formula1': '#f43f5e',
+        'sport-ncaa-football': '#06b6d4',
       },
       fontFamily: {
         oswald: ['Oswald', 'sans-serif'],

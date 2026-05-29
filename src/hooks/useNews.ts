@@ -1,9 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchArticlesBySport, fetchTopStories } from '../services/newsApi';
+import { SPORT_TEAMS } from '../constants/teams';
 import type { Article, SportId } from '../types/news';
-import { SPORTS } from '../constants/sports';
-
-const API_KEY = import.meta.env.VITE_NEWS_API_KEY as string;
 
 function filterValidArticles(articles: Article[]): Article[] {
   return articles.filter(
@@ -15,23 +13,25 @@ export function useTopStories() {
   return useQuery({
     queryKey: ['topStories'],
     queryFn: async () => {
-      const data = await fetchTopStories(API_KEY);
+      const data = await fetchTopStories();
       return filterValidArticles(data.articles);
     },
     staleTime: 5 * 60 * 1000,
-    enabled: !!API_KEY,
   });
 }
 
-export function useSportNews(sportId: SportId) {
-  const sport = SPORTS.find((s) => s.id === sportId)!;
+export function useSportNews(sportId: SportId, teamIds: string[] = []) {
+  const sportTeams = SPORT_TEAMS[sportId]?.teams ?? [];
+  const searchTerms = teamIds
+    .map((id) => sportTeams.find((t) => t.id === id)?.searchTerm)
+    .filter((t): t is string => !!t);
+
   return useQuery({
-    queryKey: ['sport', sportId],
+    queryKey: ['sport', sportId, teamIds],
     queryFn: async () => {
-      const data = await fetchArticlesBySport(sport.query, API_KEY);
+      const data = await fetchArticlesBySport(sportId, searchTerms);
       return filterValidArticles(data.articles);
     },
     staleTime: 5 * 60 * 1000,
-    enabled: !!API_KEY,
   });
 }
