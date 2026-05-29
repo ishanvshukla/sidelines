@@ -1,73 +1,66 @@
-# React + TypeScript + Vite
+# SportsFeed
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A personalized sports news reader. Pick the sports and teams you follow and get a focused feed pulled from NewsAPI — no unrelated stories.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Personalized onboarding** — two-step setup to select sports and specific teams/players
+- **8 sports** — Tennis, NBA Basketball, Cricket, Soccer, NFL Football, College Basketball, Formula 1, College Football
+- **Team filtering** — follow specific clubs, players, or programs (e.g. Arsenal, Knicks, Verstappen)
+- **Backend proxy** — API key stays server-side; the browser never sees it
+- **Persistent preferences** — selections saved to `localStorage`, skips onboarding on return visits
+- **Edit anytime** — "Edit" button in the header reopens the full onboarding flow
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Layer | Tech |
+|---|---|
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query |
+| Backend | Python, Starlette, uvicorn, httpx |
+| Data | [NewsAPI](https://newsapi.org) |
 
-## Expanding the ESLint configuration
+## Getting started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 1. Get a NewsAPI key
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Sign up for a free key at [newsapi.org](https://newsapi.org).
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### 2. Configure environment
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Create a `.env` file in the project root:
+
+```
+NEWS_API_KEY=your_key_here
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 3. Install dependencies
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# Python backend
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install starlette uvicorn httpx python-dotenv
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Frontend
+npm install
 ```
+
+### 4. Run
+
+Start both servers in separate terminals:
+
+```bash
+# Terminal 1 — backend (port 8000)
+python server.py
+
+# Terminal 2 — frontend (port 5173)
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+## How it works
+
+The Vite dev server proxies all `/api` requests to the Python backend on port 8000. The backend holds the `NEWS_API_KEY` and calls NewsAPI server-side, using `searchIn=title,description` to keep results on-topic.
+
+When specific teams are selected, the backend replaces the broad sport query with a targeted `"Team A" OR "Team B"` query, so the feed only returns articles that mention those teams in the headline or description.
