@@ -15,13 +15,22 @@ export interface NewsApiResponse {
   articles: Article[];
 }
 
-export type SportId = 'tennis' | 'basketball' | 'cricket' | 'soccer' | 'nfl' | 'ncaa-basketball' | 'formula1' | 'ncaa-football';
+export type SportId =
+  | 'tennis'
+  | 'basketball'
+  | 'cricket'
+  | 'soccer'
+  | 'nfl'
+  | 'ncaa-basketball'
+  | 'formula1'
+  | 'ncaa-football'
+  | 'ufc'
+  | 'boxing';
 
 export interface Sport {
   id: SportId;
   label: string;
   query: string;
-  icon: string;
   color: string;
   bgClass: string;
   textClass: string;
@@ -34,12 +43,31 @@ export interface Team {
   searchTerm: string;
 }
 
+export interface TeamGroup {
+  label: string;   // e.g. "Teams", "Players", "Fighters", "Clubs"
+  items: Team[];
+}
+
 export interface SportTeamConfig {
-  entityLabel: string;
-  teams: Team[];
+  groups: TeamGroup[];
+}
+
+export interface NextGame {
+  follows: string[];
+  followedSide: 'home' | 'away';
+  name: string | null;
+  home: string | null;
+  away: string | null;
+  homeBadge: string | null;
+  awayBadge: string | null;
+  homeScore: string | null;
+  awayScore: string | null;
+  league: string | null;
+  venue: string | null;
+  timestamp: string | null;
 }
 
 export interface Prefs {
   sports: SportId[];
-  teams: Partial<Record<SportId, string[]>>; // sportId → team IDs
+  teams: Partial<Record<SportId, string[]>>; // sportId → selected item IDs
 }

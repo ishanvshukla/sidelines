@@ -4,7 +4,8 @@ import type { NewsApiResponse } from '../types/news';
 export async function fetchArticlesBySport(
   sportId: string,
   searchTerms: string[] = [],
-  pageSize = 8
+  // 1 hero + 8 compact cards, plus headroom for client-side filtering
+  pageSize = 12
 ): Promise<NewsApiResponse> {
   const { data } = await axios.get<NewsApiResponse>(`/api/news/sport/${sportId}`, {
     params: {
