@@ -2,6 +2,12 @@
 
 A personalized sports news reader. Pick the sports and teams you follow and get a focused feed — headlines from NewsAPI, plus a live "Up Next" widget showing your teams' upcoming games.
 
+## Live site
+
+**[sidelines.onrender.com](https://sidelines.onrender.com)**
+
+Note: the app is hosted on Render's free tier, so it spins down after periods of inactivity — the first load after a while may take up to a minute to wake up.
+
 ## Features
 
 - **Personalized onboarding** — two-step setup to select sports and specific teams/players
@@ -20,46 +26,6 @@ A personalized sports news reader. Pick the sports and teams you follow and get 
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query, Framer Motion |
 | Backend | Python, Starlette, uvicorn, httpx, SQLite |
 | Data | [NewsAPI](https://newsapi.org) (articles), [TheSportsDB](https://www.thesportsdb.com) (fixtures) |
-
-## Getting started
-
-### 1. Get a NewsAPI key
-
-Sign up for a free key at [newsapi.org](https://newsapi.org). TheSportsDB needs no key.
-
-### 2. Configure environment
-
-Create a `.env` file in the project root:
-
-```
-NEWS_API_KEY=your_key_here
-```
-
-### 3. Install dependencies
-
-```bash
-# Python backend
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install starlette uvicorn httpx python-dotenv
-
-# Frontend
-npm install
-```
-
-### 4. Run
-
-Start both servers in separate terminals:
-
-```bash
-# Terminal 1 — backend (port 8000)
-python server.py
-
-# Terminal 2 — frontend (port 5173)
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173).
 
 ## Deploying (free, Render)
 
