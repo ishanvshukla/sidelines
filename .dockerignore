@@ -1,0 +1,10 @@
+node_modules
+dist
+.venv
+.git
+__pycache__
+app.egg-info
+*.pyc
+users.db
+.env
+core

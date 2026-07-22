@@ -16,7 +16,8 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
 
 load_dotenv()
 
@@ -633,16 +634,26 @@ async def lifespan(app: Starlette):
     await http_client.aclose()
 
 
+routes = [
+    Route("/api/auth/register", register, methods=["POST"]),
+    Route("/api/auth/login", login, methods=["POST"]),
+    Route("/api/prefs", prefs, methods=["GET", "PUT"]),
+    Route("/api/news/top", top_stories),
+    Route("/api/news/sport/{sport_id}", sport_news),
+    Route("/api/scores/next", next_games),
+]
+
+# In production the built frontend (npm run build -> dist/) is served by this
+# same process, so the browser only ever talks to one origin. Locally the
+# frontend instead runs via `npm run dev` on its own port, and dist/ won't
+# exist — skip the mount rather than fail startup.
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "dist")
+if os.path.isdir(FRONTEND_DIST):
+    routes.append(Mount("/", app=StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend"))
+
 app = Starlette(
     lifespan=lifespan,
-    routes=[
-        Route("/api/auth/register", register, methods=["POST"]),
-        Route("/api/auth/login", login, methods=["POST"]),
-        Route("/api/prefs", prefs, methods=["GET", "PUT"]),
-        Route("/api/news/top", top_stories),
-        Route("/api/news/sport/{sport_id}", sport_news),
-        Route("/api/scores/next", next_games),
-    ],
+    routes=routes,
     middleware=[
         Middleware(
             CORSMiddleware,
@@ -655,4 +666,5 @@ app = Starlette(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
