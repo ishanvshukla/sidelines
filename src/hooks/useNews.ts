@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchArticlesBySport, fetchTopStories } from '../services/newsApi';
 import { fetchNextGames } from '../services/scoresApi';
-import { allItemsForSport, followedEntities } from '../constants/teams';
+import { followedEntities } from '../constants/teams';
 import type { Article, Prefs, SportId } from '../types/news';
 
 // Known non-news/shopping domains that may still slip through the backend filter
@@ -53,16 +53,11 @@ export function useNextGames(teams: Prefs['teams']) {
   });
 }
 
-export function useSportNews(sportId: SportId, teamIds: string[] = []) {
-  const allItems = allItemsForSport(sportId);
-  const searchTerms = teamIds
-    .map((id) => allItems.find((t) => t.id === id)?.searchTerm)
-    .filter((t): t is string => !!t);
-
+export function useSportNews(sportId: SportId) {
   return useQuery({
-    queryKey: ['sport', sportId, teamIds],
+    queryKey: ['sport', sportId],
     queryFn: async () => {
-      const data = await fetchArticlesBySport(sportId, searchTerms);
+      const data = await fetchArticlesBySport(sportId);
       return filterValidArticles(data.articles);
     },
     staleTime: 5 * 60 * 1000,

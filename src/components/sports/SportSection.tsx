@@ -13,7 +13,7 @@ interface Props {
 
 export default function SportSection({ sportId, teamIds }: Props) {
   const sport = SPORT_MAP[sportId];
-  const { data: articles, isLoading, isError, refetch, isRefetching } = useSportNews(sportId, teamIds);
+  const { data: articles, isLoading, isError, refetch, isRefetching } = useSportNews(sportId);
 
   const selectedItems = teamIds.length > 0
     ? allItemsForSport(sportId).filter((item) => teamIds.includes(item.id))

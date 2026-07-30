@@ -399,7 +399,9 @@ async def record_visit(request: Request) -> JSONResponse:
 # Successful NewsAPI responses are cached in SQLite: served as-is while fresh
 # (no quota spent), and served stale — any age — when the upstream fails, so a
 # rate-limited key degrades to older headlines instead of an error.
-NEWS_CACHE_TTL = timedelta(minutes=30)
+# 3h keeps worst-case daily requests (11 cache keys x 24/3 refreshes) well under
+# the free-tier 100/day quota even under continuous traffic.
+NEWS_CACHE_TTL = timedelta(hours=3)
 
 
 def _news_cache_get(cache_key: str) -> tuple[dict, datetime] | None:
@@ -497,15 +499,13 @@ async def sport_news(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"Unknown sport: {sport_id}"}, status_code=404)
     page_size = int(request.query_params.get("pageSize", "8"))
 
-    teams_param = request.query_params.get("teams", "")
-    if teams_param:
-        terms = [t.strip() for t in teams_param.split(",") if t.strip()]
-        query = " OR ".join(f'"{t}"' for t in terms)
-    else:
-        query = SPORT_QUERIES[sport_id]
-
+    # Always the sport-wide query, never scoped to a user's followed teams — a
+    # per-team query would mint its own NewsAPI cache entry per unique team
+    # combination, multiplying quota usage with the user base instead of
+    # staying fixed. Team relevance is surfaced client-side by tagging articles
+    # from this shared set that mention a followed team (see detectTag).
     return await _fetch_news(
-        query,
+        SPORT_QUERIES[sport_id],
         page_size,
         domains=SPORT_DOMAINS.get(sport_id),
     )
