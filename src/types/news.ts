@@ -18,14 +18,11 @@ export interface NewsApiResponse {
 export type SportId =
   | 'tennis'
   | 'basketball'
-  | 'cricket'
   | 'soccer'
   | 'nfl'
-  | 'ncaa-basketball'
   | 'formula1'
   | 'ncaa-football'
-  | 'ufc'
-  | 'boxing';
+  | 'ufc';
 
 export interface Sport {
   id: SportId;

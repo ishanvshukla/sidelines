@@ -36,14 +36,11 @@ JWT_EXPIRE_DAYS = 30
 SPORT_QUERIES: dict[str, str] = {
     "tennis": 'tennis OR ATP OR WTA OR Wimbledon OR "US Open" OR "French Open" OR "Australian Open"',
     "basketball": "basketball OR NBA",
-    "cricket": 'cricket OR IPL OR "T20 World Cup" OR Ashes OR "Test cricket" OR ODI OR T20 OR "Champions Trophy" OR "World Test Championship"',
     "soccer": 'soccer OR "Premier League" OR "La Liga" OR MLS',
     "nfl": 'NFL OR "American football" OR quarterback',
-    "ncaa-basketball": '"college basketball" OR "NCAA basketball" OR "March Madness" OR "Final Four" OR "basketball transfer portal" OR NIL',
     "formula1": '"Formula 1" OR "Formula One" OR "Grand Prix" OR F1 OR "pole position" OR "starting grid" OR "constructors\' championship"',
     "ncaa-football": '"college football" OR "NCAA football" OR "bowl game" OR "transfer portal" OR "signing day"',
     "ufc": 'UFC OR MMA OR "mixed martial arts"',
-    "boxing": 'boxing OR "heavyweight boxing" OR "world championship boxing" OR WBC OR WBA OR IBF OR WBO OR "world title fight" OR "unified champion" OR "Matchroom Boxing" OR "Top Rank"',
 }
 
 # Per-sport domain allowlists: mainstream sports media + SB Nation/FanSided team blogs.
@@ -113,16 +110,6 @@ SPORT_DOMAINS: dict[str, str] = {
         "fansided.com",
     ),
 
-    "cricket": _d(
-        "bbc.co.uk", "theguardian.com", "skysports.com", "reuters.com", "apnews.com",
-        # Indian outlets (massive cricket audience)
-        "timesofindia.com", "hindustantimes.com", "ndtv.com",
-        # Cricket-specialist sites & blogs
-        "espncricinfo.com", "cricbuzz.com", "wisden.com",
-        "cricket.com.au", "icc-cricket.com", "sportskeeda.com", "cricblog.net",
-        "crictracker.com",
-    ),
-
     "soccer": _d(
         "espn.com", "cbssports.com", "si.com", "bleacherreport.com",
         "bbc.co.uk", "theguardian.com", "skysports.com",
@@ -144,13 +131,6 @@ SPORT_DOMAINS: dict[str, str] = {
         "racefans.net", "planetf1.com", "motorsport.com", "autosport.com",
         "the-race.com", "grandprix.com", "f1-fansite.com", "beyondtheflag.com",
         "formula1.com", "crash.net", "f1i.com",
-    ),
-
-    "ncaa-basketball": _d(
-        _MAINSTREAM,
-        # College sports specialists
-        "247sports.com", "rivals.com", "on3.com", "collegespun.com",
-        "sbnation.com", "fansided.com", "fadeawayworld.net", "hoopshq.com",
     ),
 
     "ncaa-football": _d(
@@ -175,16 +155,6 @@ SPORT_DOMAINS: dict[str, str] = {
         # MMA/UFC-specialist sites — mmafighting.com and bloodyelbow.com are SB Nation properties
         "ufc.com", "mmafighting.com", "mmajunkie.com", "bloodyelbow.com",
         "sherdog.com", "mmamania.com", "lowkickmma.com", "tapology.com",
-        "fansided.com", "sbnation.com",
-    ),
-
-    "boxing": _d(
-        "espn.com", "cbssports.com", "si.com", "bleacherreport.com",
-        "reuters.com", "apnews.com", "skysports.com", "bbc.co.uk", "theguardian.com",
-        # Boxing-specialist sites — badlefthook.com is the SB Nation boxing blog
-        "boxingscene.com", "ringtv.com", "secondsout.com", "badlefthook.com",
-        "fightnews.com", "boxingnewsonline.net", "boxing247.co.uk",
-        "worldboxingnews.com", "boxingnews24.com",
         "fansided.com", "sbnation.com",
     ),
 }
@@ -489,7 +459,7 @@ async def _fetch_news(
 
 async def top_stories(request: Request) -> JSONResponse:
     return await _fetch_news(
-        "tennis OR basketball OR cricket OR soccer OR NFL",
+        "tennis OR basketball OR soccer OR NFL",
         6,
         exclude_domains=_TOP_STORIES_EXCLUDE,
     )
@@ -544,14 +514,11 @@ async def _tsdb_get(url: str, ttl: timedelta) -> dict | None:
 TSDB_SPORT_NAMES = {
     "tennis": "Tennis",
     "basketball": "Basketball",
-    "ncaa-basketball": "Basketball",
-    "cricket": "Cricket",
     "soccer": "Soccer",
     "nfl": "American Football",
     "ncaa-football": "American Football",
     "formula1": "Motorsport",
     "ufc": "Fighting",
-    "boxing": "Fighting",
 }
 TENNIS_LEAGUE_IDS = {"ATP": "4464", "WTA": "4517"}
 

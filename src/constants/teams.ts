@@ -155,67 +155,6 @@ export const SPORT_TEAMS: Partial<Record<SportId, SportTeamConfig>> = {
     ],
   },
 
-  cricket: {
-    groups: [
-      {
-        label: 'Teams',
-        items: [
-          { id: 'india',   name: 'India',               searchTerm: 'India cricket' },
-          { id: 'aus',     name: 'Australia',            searchTerm: 'Australia cricket' },
-          { id: 'eng',     name: 'England',              searchTerm: 'England cricket' },
-          { id: 'pak',     name: 'Pakistan',             searchTerm: 'Pakistan cricket' },
-          { id: 'nz',      name: 'New Zealand',          searchTerm: 'New Zealand cricket' },
-          { id: 'sa',      name: 'South Africa',         searchTerm: 'South Africa cricket' },
-          { id: 'wi',      name: 'West Indies',          searchTerm: 'West Indies cricket' },
-          { id: 'mi',      name: 'Mumbai Indians',       searchTerm: 'Mumbai Indians' },
-          { id: 'csk',     name: 'Chennai Super Kings',  searchTerm: 'Chennai Super Kings' },
-          { id: 'rcb',     name: 'Royal Challengers',    searchTerm: 'Royal Challengers' },
-          { id: 'kkr',     name: 'Kolkata Knight Riders', searchTerm: 'Kolkata Knight Riders' },
-          { id: 'dc',      name: 'Delhi Capitals',       searchTerm: 'Delhi Capitals' },
-          { id: 'srh',     name: 'Sunrisers Hyderabad',  searchTerm: 'Sunrisers Hyderabad' },
-          { id: 'pbks',    name: 'Punjab Kings',         searchTerm: 'Punjab Kings' },
-          { id: 'gt',      name: 'Gujarat Titans',       searchTerm: 'Gujarat Titans' },
-          { id: 'lsg',     name: 'Lucknow Super Giants', searchTerm: 'Lucknow Super Giants' },
-        ],
-      },
-      {
-        label: 'Players',
-        items: [
-          { id: 'kohli',    name: 'Virat Kohli',         searchTerm: 'Virat Kohli' },
-          { id: 'rohit',    name: 'Rohit Sharma',        searchTerm: 'Rohit Sharma' },
-          { id: 'dhoni',    name: 'MS Dhoni',            searchTerm: 'MS Dhoni' },
-          { id: 'babar',    name: 'Babar Azam',          searchTerm: 'Babar Azam' },
-          { id: 'warner',   name: 'David Warner',        searchTerm: 'David Warner' },
-          { id: 'root',     name: 'Joe Root',            searchTerm: 'Joe Root cricket' },
-          { id: 'smith',    name: 'Steve Smith',         searchTerm: 'Steve Smith cricket' },
-          { id: 'stokes',   name: 'Ben Stokes',          searchTerm: 'Ben Stokes' },
-          { id: 'bumrah',   name: 'Jasprit Bumrah',      searchTerm: 'Jasprit Bumrah' },
-          { id: 'pant',     name: 'Rishabh Pant',        searchTerm: 'Rishabh Pant' },
-          { id: 'jadeja',   name: 'Ravindra Jadeja',     searchTerm: 'Ravindra Jadeja' },
-          { id: 'ashwin',   name: 'Ravichandran Ashwin', searchTerm: 'R Ashwin' },
-          { id: 'hardik',   name: 'Hardik Pandya',       searchTerm: 'Hardik Pandya' },
-          { id: 'shreyas',  name: 'Shreyas Iyer',        searchTerm: 'Shreyas Iyer' },
-          { id: 'shubman',  name: 'Shubman Gill',        searchTerm: 'Shubman Gill' },
-          { id: 'siraj',    name: 'Mohammed Siraj',      searchTerm: 'Mohammed Siraj' },
-          { id: 'labuschagne', name: 'Marnus Labuschagne', searchTerm: 'Marnus Labuschagne' },
-          { id: 'cummins',  name: 'Pat Cummins',         searchTerm: 'Pat Cummins' },
-          { id: 'starc',    name: 'Mitchell Starc',      searchTerm: 'Mitchell Starc' },
-          { id: 'hazelwood', name: 'Josh Hazelwood',     searchTerm: 'Josh Hazelwood' },
-          { id: 'rashid',   name: 'Adil Rashid',         searchTerm: 'Adil Rashid' },
-          { id: 'woakes',   name: 'Chris Woakes',        searchTerm: 'Chris Woakes' },
-          { id: 'anderson', name: 'James Anderson',      searchTerm: 'James Anderson cricket' },
-          { id: 'broad',    name: 'Stuart Broad',        searchTerm: 'Stuart Broad' },
-          { id: 'rabada',   name: 'Kagiso Rabada',       searchTerm: 'Kagiso Rabada' },
-          { id: 'elgar',    name: 'Dean Elgar',          searchTerm: 'Dean Elgar' },
-          { id: 'holder',   name: 'Jason Holder',        searchTerm: 'Jason Holder' },
-          { id: 'pooran',   name: 'Nicholas Pooran',     searchTerm: 'Nicholas Pooran' },
-          { id: 'shaheen',  name: 'Shaheen Afridi',      searchTerm: 'Shaheen Afridi' },
-          { id: 'narine',   name: 'Sunil Narine',        searchTerm: 'Sunil Narine' },
-        ],
-      },
-    ],
-  },
-
   soccer: {
     groups: [
       {
@@ -380,32 +319,6 @@ export const SPORT_TEAMS: Partial<Record<SportId, SportTeamConfig>> = {
     ],
   },
 
-  'ncaa-basketball': {
-    groups: [
-      {
-        label: 'Programs',
-        items: [
-          { id: 'duke',          name: 'Duke',            searchTerm: 'Duke basketball' },
-          { id: 'kentucky',      name: 'Kentucky',        searchTerm: 'Kentucky basketball' },
-          { id: 'kansas',        name: 'Kansas',          searchTerm: 'Kansas basketball' },
-          { id: 'unc',           name: 'North Carolina',  searchTerm: 'North Carolina basketball' },
-          { id: 'gonzaga',       name: 'Gonzaga',         searchTerm: 'Gonzaga' },
-          { id: 'uconn',         name: 'UConn',           searchTerm: 'UConn basketball' },
-          { id: 'michiganstate', name: 'Michigan State',  searchTerm: 'Michigan State basketball' },
-          { id: 'arizona',       name: 'Arizona',         searchTerm: 'Arizona basketball' },
-          { id: 'villanova',     name: 'Villanova',       searchTerm: 'Villanova' },
-          { id: 'indiana',       name: 'Indiana',         searchTerm: 'Indiana basketball' },
-          { id: 'ucla',          name: 'UCLA',            searchTerm: 'UCLA basketball' },
-          { id: 'houston',       name: 'Houston',         searchTerm: 'Houston Cougars' },
-          { id: 'auburn',        name: 'Auburn',          searchTerm: 'Auburn basketball' },
-          { id: 'tennessee',     name: 'Tennessee',       searchTerm: 'Tennessee basketball' },
-          { id: 'purdue',        name: 'Purdue',          searchTerm: 'Purdue basketball' },
-          { id: 'marquette',     name: 'Marquette',       searchTerm: 'Marquette basketball' },
-        ],
-      },
-    ],
-  },
-
   formula1: {
     groups: [
       {
@@ -515,45 +428,6 @@ export const SPORT_TEAMS: Partial<Record<SportId, SportTeamConfig>> = {
     ],
   },
 
-  boxing: {
-    groups: [
-      {
-        label: 'Fighters',
-        items: [
-          { id: 'canelo',     name: 'Canelo Alvarez',       searchTerm: 'Canelo' },
-          { id: 'fury',       name: 'Tyson Fury',           searchTerm: 'Tyson Fury' },
-          { id: 'joshua',     name: 'Anthony Joshua',       searchTerm: 'Anthony Joshua' },
-          { id: 'usyk',       name: 'Oleksandr Usyk',       searchTerm: 'Usyk' },
-          { id: 'wilder',     name: 'Deontay Wilder',       searchTerm: 'Deontay Wilder' },
-          { id: 'crawford',   name: 'Terence Crawford',     searchTerm: 'Terence Crawford' },
-          { id: 'gdavis',     name: 'Gervonta Davis',       searchTerm: 'Gervonta Davis' },
-          { id: 'rgarcia',    name: 'Ryan Garcia',          searchTerm: 'Ryan Garcia' },
-          { id: 'inoue',      name: 'Naoya Inoue',          searchTerm: 'Naoya Inoue' },
-          { id: 'jakepaul',   name: 'Jake Paul',            searchTerm: 'Jake Paul boxing' },
-          { id: 'benavidez',  name: 'David Benavidez',      searchTerm: 'David Benavidez' },
-          { id: 'haney',      name: 'Devin Haney',          searchTerm: 'Devin Haney' },
-          { id: 'loma',       name: 'Vasyl Lomachenko',     searchTerm: 'Vasyl Lomachenko' },
-          { id: 'spence',     name: 'Errol Spence Jr.',     searchTerm: 'Errol Spence' },
-          { id: 'martin',     name: 'Jaime Munguia',        searchTerm: 'Jaime Munguia' },
-          { id: 'bivol',      name: 'Dmitry Bivol',         searchTerm: 'Dmitry Bivol' },
-          { id: 'plant',      name: 'Caleb Plant',          searchTerm: 'Caleb Plant' },
-          { id: 'andrade',    name: 'Demetrius Andrade',    searchTerm: 'Demetrius Andrade' },
-          { id: 'charlo',     name: 'Jermell Charlo',       searchTerm: 'Jermell Charlo' },
-          { id: 'martinez',   name: 'Vergil Ortiz Jr.',     searchTerm: 'Vergil Ortiz' },
-          { id: 'tank',       name: "Tank Davis",           searchTerm: 'Gervonta Davis Tank' },
-          { id: 'dubois',     name: 'Daniel Dubois',        searchTerm: 'Daniel Dubois' },
-          { id: 'whyte',      name: 'Dillian Whyte',        searchTerm: 'Dillian Whyte' },
-          { id: 'joyce',      name: 'Joe Joyce',            searchTerm: 'Joe Joyce boxer' },
-          { id: 'ngannou-box', name: 'Francis Ngannou',     searchTerm: 'Ngannou boxing' },
-          { id: 'pauloandre',  name: 'Paulo Andrade',       searchTerm: 'Paulo Andrade' },
-          { id: 'adrien',      name: 'Adrien Broner',       searchTerm: 'Adrien Broner' },
-          { id: 'txxx',        name: 'Tommy Fury',          searchTerm: 'Tommy Fury boxing' },
-          { id: 'ramirezj',    name: 'Jose Ramirez',        searchTerm: 'Jose Ramirez boxing' },
-          { id: 'ennis',       name: 'Jaron Ennis',         searchTerm: 'Jaron Ennis' },
-        ],
-      },
-    ],
-  },
 };
 
 /** Flatten all groups for a sport into a single item list (for search-term lookups). */
