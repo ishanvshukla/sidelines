@@ -6,6 +6,7 @@ import NextGameWidget from './components/sports/NextGameWidget';
 import SportPicker from './components/onboarding/SportPicker';
 import TeamPicker from './components/onboarding/TeamPicker';
 import AuthModal from './components/auth/AuthModal';
+import VisitorCounter from './components/ui/VisitorCounter';
 
 import type { SportId, Prefs } from './types/news';
 
@@ -161,6 +162,7 @@ function AppContent() {
       </footer>
 
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+      <VisitorCounter />
     </div>
   );
 }

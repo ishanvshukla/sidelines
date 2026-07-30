@@ -35,8 +35,8 @@ JWT_EXPIRE_DAYS = 30
 
 SPORT_QUERIES: dict[str, str] = {
     "tennis": "tennis",
-    "basketball": "basketball NBA",
-    "cricket": "cricket IPL",
+    "basketball": "basketball OR NBA",
+    "cricket": "cricket OR IPL",
     "soccer": 'soccer OR "Premier League" OR "La Liga" OR MLS',
     "nfl": 'NFL OR "American football" OR quarterback',
     "ncaa-basketball": '"college basketball" OR "NCAA basketball" OR "March Madness"',
@@ -229,6 +229,16 @@ def init_db() -> None:
                 fetched_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visitor_counter (
+                id            INTEGER PRIMARY KEY CHECK (id = 1),
+                unique_count  INTEGER NOT NULL,
+                total_visits  INTEGER NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT OR IGNORE INTO visitor_counter (id, unique_count, total_visits) VALUES (1, 0, 0)"
+        )
         conn.commit()
 
 
@@ -360,6 +370,29 @@ async def prefs(request: Request) -> JSONResponse:
         conn.commit()
 
     return JSONResponse({"ok": True})
+
+
+# ── Visitor counter ───────────────────────────────────────────────────────────
+# The frontend claims a unique number once per browser (stored in localStorage)
+# and displays it forever after; total_visits bumps on every page load,
+# including repeat visits, so the widget can show both "you're visitor #X"
+# and "Y visits so far".
+
+async def record_visit(request: Request) -> JSONResponse:
+    body = await request.json() if await request.body() else {}
+    claim = bool(body.get("claim"))
+    with get_db() as conn:
+        if claim:
+            conn.execute(
+                "UPDATE visitor_counter SET unique_count = unique_count + 1, total_visits = total_visits + 1 WHERE id = 1"
+            )
+        else:
+            conn.execute("UPDATE visitor_counter SET total_visits = total_visits + 1 WHERE id = 1")
+        row = conn.execute(
+            "SELECT unique_count, total_visits FROM visitor_counter WHERE id = 1"
+        ).fetchone()
+        conn.commit()
+    return JSONResponse({"number": row["unique_count"], "totalVisits": row["total_visits"]})
 
 
 # ── News routes ───────────────────────────────────────────────────────────────
@@ -638,6 +671,7 @@ routes = [
     Route("/api/auth/register", register, methods=["POST"]),
     Route("/api/auth/login", login, methods=["POST"]),
     Route("/api/prefs", prefs, methods=["GET", "PUT"]),
+    Route("/api/visitor", record_visit, methods=["POST"]),
     Route("/api/news/top", top_stories),
     Route("/api/news/sport/{sport_id}", sport_news),
     Route("/api/scores/next", next_games),
