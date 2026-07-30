@@ -33,6 +33,14 @@ export default function SportSection({ sportId, teamIds }: Props) {
     return null;
   }
 
+  // The feed is the sport's general headlines, not a dedicated per-team search (see
+  // sport_news in server.py), so a followed team's articles can land anywhere in
+  // publish order. Float tagged matches to the front (stable sort keeps recency
+  // order within each group) so they survive the slice(0, 9) below instead of
+  // being pushed off-grid by untagged headlines.
+  const tagged = articles?.map((article) => ({ article, tag: detectTag(article) })) ?? [];
+  const displayItems = [...tagged].sort((a, b) => Number(!a.tag) - Number(!b.tag)).slice(0, 9);
+
   return (
     <section className="pt-10" id={sportId}>
       <div className="flex items-center gap-3 mb-5">
@@ -79,13 +87,13 @@ export default function SportSection({ sportId, teamIds }: Props) {
             // to establish those rows' height. With fewer than 5 articles there's nothing
             // to size row 2 against, and the hero collapses to a sliver. Below that count,
             // render everything as compact cards instead.
-            articles?.slice(0, 9).map((article, i) => (
+            displayItems.map(({ article, tag }, i) => (
               <ArticleCard
                 key={article.url}
                 article={article}
                 sport={sport}
-                tagLabel={detectTag(article)}
-                variant={i === 0 && (articles?.length ?? 0) >= 5 ? 'hero' : 'compact'}
+                tagLabel={tag}
+                variant={i === 0 && displayItems.length >= 5 ? 'hero' : 'compact'}
               />
             ))
           )}
