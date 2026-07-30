@@ -34,14 +34,14 @@ JWT_ALG = "HS256"
 JWT_EXPIRE_DAYS = 30
 
 SPORT_QUERIES: dict[str, str] = {
-    "tennis": "tennis",
+    "tennis": 'tennis OR ATP OR WTA OR Wimbledon OR "US Open" OR "French Open" OR "Australian Open"',
     "basketball": "basketball OR NBA",
     "cricket": "cricket OR IPL",
     "soccer": 'soccer OR "Premier League" OR "La Liga" OR MLS',
     "nfl": 'NFL OR "American football" OR quarterback',
-    "ncaa-basketball": '"college basketball" OR "NCAA basketball" OR "March Madness"',
+    "ncaa-basketball": '"college basketball" OR "NCAA basketball" OR "March Madness" OR "Final Four" OR "basketball transfer portal"',
     "formula1": '"Formula 1" OR "Formula One" OR "Grand Prix"',
-    "ncaa-football": '"college football" OR "NCAA football" OR "bowl game"',
+    "ncaa-football": '"college football" OR "NCAA football" OR "bowl game" OR "transfer portal" OR "signing day"',
     "ufc": 'UFC OR MMA OR "mixed martial arts"',
     "boxing": 'boxing OR "heavyweight boxing" OR "world championship boxing"',
 }
@@ -53,8 +53,8 @@ def _d(*domains: str) -> str:
     return ",".join(domains)
 
 _MAINSTREAM = _d(
-    "espn.com", "cbssports.com", "nbcsports.com", "si.com", "bleacherreport.com",
-    "theathletic.com", "usatoday.com", "sportingnews.com", "theringer.com",
+    "espn.com", "cbssports.com", "nbcsports.com", "foxsports.com", "si.com", "bleacherreport.com",
+    "usatoday.com", "sportingnews.com", "theringer.com",
     "apnews.com", "reuters.com",
 )
 
@@ -124,7 +124,7 @@ SPORT_DOMAINS: dict[str, str] = {
 
     "soccer": _d(
         "espn.com", "cbssports.com", "si.com", "bleacherreport.com",
-        "theathletic.com", "bbc.co.uk", "theguardian.com", "skysports.com",
+        "bbc.co.uk", "theguardian.com", "skysports.com",
         "reuters.com", "apnews.com",
         # Soccer-specialist sites
         "goal.com", "90min.com", "givemesport.com", "worldsoccertalk.com",
@@ -146,27 +146,26 @@ SPORT_DOMAINS: dict[str, str] = {
     ),
 
     "ncaa-basketball": _d(
-        "espn.com", "cbssports.com", "si.com", "bleacherreport.com",
-        "theathletic.com", "usatoday.com", "sportingnews.com", "apnews.com",
+        _MAINSTREAM,
         # College sports specialists
         "247sports.com", "rivals.com", "on3.com", "collegespun.com",
-        "sbnation.com", "fansided.com",
+        "sbnation.com", "fansided.com", "fadeawayworld.net",
     ),
 
     "ncaa-football": _d(
-        "espn.com", "cbssports.com", "si.com", "bleacherreport.com",
-        "theathletic.com", "usatoday.com", "sportingnews.com", "apnews.com",
+        _MAINSTREAM,
         # College sports specialists
         "247sports.com", "rivals.com", "on3.com", "collegefootballnews.com",
-        "sbnation.com", "fansided.com",
+        "collegefootballnetwork.com", "sbnation.com", "fansided.com",
     ),
 
     "tennis": _d(
-        "espn.com", "si.com", "bbc.co.uk", "theguardian.com",
-        "reuters.com", "apnews.com", "skysports.com",
+        _MAINSTREAM, "bbc.co.uk", "theguardian.com", "skysports.com",
+        "nypost.com", "businessinsider.com",
         # Tennis-specialist sites & blogs
-        "tennishead.net", "tennisnow.com", "tennis.com",
+        "tennishead.net", "tennisnow.com", "tennis.com", "tennisworldusa.org",
         "atptour.com", "wtatennis.com", "ubitennis.net", "sportskeeda.com",
+        "essentiallysports.com", "talksport.com", "eurosport.com",
     ),
 
     "ufc": _d(

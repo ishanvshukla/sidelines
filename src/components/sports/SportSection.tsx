@@ -74,13 +74,18 @@ export default function SportSection({ sportId, teamIds }: Props) {
               {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
             </>
           ) : (
+            // The hero card spans 2 grid rows via sm:row-span-2 with no fixed height of
+            // its own (sm:aspect-auto) — it relies on the 4 compact cards beside/below it
+            // to establish those rows' height. With fewer than 5 articles there's nothing
+            // to size row 2 against, and the hero collapses to a sliver. Below that count,
+            // render everything as compact cards instead.
             articles?.slice(0, 9).map((article, i) => (
               <ArticleCard
                 key={article.url}
                 article={article}
                 sport={sport}
                 tagLabel={detectTag(article)}
-                variant={i === 0 ? 'hero' : 'compact'}
+                variant={i === 0 && (articles?.length ?? 0) >= 5 ? 'hero' : 'compact'}
               />
             ))
           )}
