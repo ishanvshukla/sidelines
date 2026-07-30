@@ -9,13 +9,25 @@ import AuthModal from './components/auth/AuthModal';
 import VisitorCounter from './components/ui/VisitorCounter';
 
 import type { SportId, Prefs } from './types/news';
+import { SPORT_MAP } from './constants/sports';
 
 const STORAGE_KEY = 'prefs';
+
+// Drops sport ids that no longer exist (e.g. a sport was retired after these
+// prefs were saved) — an unrecognized id reaching SportSection/SPORT_MAP
+// crashes the render tree with no ErrorBoundary to catch it.
+function sanitizePrefs(prefs: Prefs): Prefs {
+  const sports = prefs.sports.filter((id) => SPORT_MAP[id]);
+  const teams = Object.fromEntries(
+    Object.entries(prefs.teams).filter(([id]) => SPORT_MAP[id as SportId])
+  ) as Prefs['teams'];
+  return { sports, teams };
+}
 
 function loadPrefs(): Prefs | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Prefs) : null;
+    return raw ? sanitizePrefs(JSON.parse(raw) as Prefs) : null;
   } catch {
     return null;
   }
@@ -34,7 +46,7 @@ function AppContent() {
 
   // Prefer server prefs if logged in, otherwise fall back to localStorage
   const [prefs, setPrefs] = useState<Prefs | null>(() => {
-    if (auth.isLoggedIn && auth.serverPrefs) return auth.serverPrefs;
+    if (auth.isLoggedIn && auth.serverPrefs) return sanitizePrefs(auth.serverPrefs);
     return loadPrefs();
   });
   const [step, setStep] = useState<Step>(() => {
@@ -47,8 +59,9 @@ function AppContent() {
   // When the user logs in during the session, apply their server prefs
   useEffect(() => {
     if (auth.serverPrefs) {
-      setPrefs(auth.serverPrefs);
-      savePrefs(auth.serverPrefs);
+      const sanitized = sanitizePrefs(auth.serverPrefs);
+      setPrefs(sanitized);
+      savePrefs(sanitized);
       setStep('main');
       setActiveFilter('all');
     }
