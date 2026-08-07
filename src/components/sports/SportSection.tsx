@@ -36,10 +36,10 @@ export default function SportSection({ sportId, teamIds }: Props) {
   // The feed is the sport's general headlines, not a dedicated per-team search (see
   // sport_news in server.py), so a followed team's articles can land anywhere in
   // publish order. Float tagged matches to the front (stable sort keeps recency
-  // order within each group) so they survive the slice(0, 9) below instead of
+  // order within each group) so they survive the slice(0, 16) below instead of
   // being pushed off-grid by untagged headlines.
   const tagged = articles?.map((article) => ({ article, tag: detectTag(article) })) ?? [];
-  const displayItems = [...tagged].sort((a, b) => Number(!a.tag) - Number(!b.tag)).slice(0, 9);
+  const displayItems = [...tagged].sort((a, b) => Number(!a.tag) - Number(!b.tag)).slice(0, 16);
 
   return (
     <section className="pt-10" id={sportId}>
