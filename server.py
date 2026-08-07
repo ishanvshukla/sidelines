@@ -25,6 +25,12 @@ NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
 NEWS_API_BASE = "https://newsapi.org/v2/everything"
 DB_PATH = os.environ.get("DB_PATH", "users.db")
 
+# Upstash Redis (REST API, no persistent connection needed) backs the visitor
+# counter so it survives Render free-tier spin-downs, which wipe the local
+# SQLite file. Falls back to SQLite (resets on restart) when unset, e.g. local dev.
+UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+
 _jwt_secret = os.environ.get("JWT_SECRET", "")
 if not _jwt_secret:
     _jwt_secret = secrets.token_hex(32)
@@ -347,11 +353,33 @@ async def prefs(request: Request) -> JSONResponse:
 # The frontend claims a unique number once per browser (stored in localStorage)
 # and displays it forever after; total_visits bumps on every page load,
 # including repeat visits, so the widget can show both "you're visitor #X"
-# and "Y visits so far".
+# and "Y visits so far". Counters live in Upstash Redis (see UPSTASH_REDIS_REST_URL
+# above) when configured, since that's the piece that actually needs to survive
+# Render spin-downs; falls back to the local SQLite row otherwise.
 
 async def record_visit(request: Request) -> JSONResponse:
     body = await request.json() if await request.body() else {}
     claim = bool(body.get("claim"))
+
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        commands = [["INCR", "total_visits"]]
+        if claim:
+            commands.append(["INCR", "unique_count"])
+        try:
+            resp = await http_client.post(
+                f"{UPSTASH_REDIS_REST_URL}/pipeline",
+                headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"},
+                json=commands,
+            )
+            resp.raise_for_status()
+            results = resp.json()
+        except httpx.HTTPError:
+            return JSONResponse({"error": "Visitor counter unreachable"}, status_code=502)
+        total_visits = results[0]["result"]
+        # Frontend only reads `number` when claim=True, so no unique_count fetch otherwise.
+        unique_count = results[1]["result"] if claim else 0
+        return JSONResponse({"number": unique_count, "totalVisits": total_visits})
+
     with get_db() as conn:
         if claim:
             conn.execute(
