@@ -39,6 +39,11 @@ Browser ── GET /        → static React app
                             fixtures (TheSportsDB, cached in SQLite) · visitor count (Redis)
 ```
 
+- **Auth & prefs** — registration/login issue a JWT (stored client-side); a logged-in user's sport/team selections are saved server-side, while guests fall back to `localStorage` so the app still works without an account.
+- **News & fixtures** — the backend proxies every third-party call, so API keys never reach the browser. Each response is cached in SQLite and served from cache while fresh; if an upstream call fails or rate-limits, the last cached response is served regardless of age rather than showing an error.
+- **Visitor counter** — the one piece of state not in SQLite. It's backed by Upstash Redis in production because Render's free tier has no persistent disk — a redeploy wipes local SQLite, which would otherwise reset the count on every deploy.
+- **Build & deploy** — a multi-stage Docker build compiles the frontend to static assets, then copies them into a slim Python image alongside the backend, so the shipped container has no Node runtime. In local dev, Vite proxies `/api/*` to the backend so both run side by side without CORS configuration.
+
 The frontend authenticates and manages sport/team preferences through the API, storing a JWT and a local copy of prefs in `localStorage` as a guest-mode fallback and offline cache. The backend proxies all third-party calls server-side — the NewsAPI key never reaches the browser — and caches every response in SQLite so repeat requests are served locally instead of re-hitting the upstream APIs, falling back to stale cached data if an upstream call fails. In dev, Vite proxies `/api/*` to the local backend so both run side by side without CORS setup; in prod, the Docker build compiles the frontend into static assets that the same backend process serves directly.
 
 ## Running locally
