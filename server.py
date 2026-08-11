@@ -3,9 +3,9 @@ import hmac
 import json
 import os
 import secrets
-import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -23,11 +23,12 @@ load_dotenv()
 
 NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
 NEWS_API_BASE = "https://newsapi.org/v2/everything"
-DB_PATH = os.environ.get("DB_PATH", "users.db")
 
-# Upstash Redis (REST API, no persistent connection needed) backs the visitor
-# counter so it survives Render free-tier spin-downs, which wipe the local
-# SQLite file. Falls back to SQLite (resets on restart) when unset, e.g. local dev.
+# Upstash Redis (REST API, no persistent connection needed) is the sole
+# datastore — users, prefs, and the news/fixtures cache all live here, not
+# just the visitor counter. Render's free tier has no persistent disk, so
+# anything kept in a local file (SQLite, as this used to be) gets wiped on
+# every redeploy; Redis is external and survives that.
 UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
@@ -174,49 +175,26 @@ _TOP_STORIES_EXCLUDE = ",".join([
 http_client: httpx.AsyncClient | None = None
 
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Redis (Upstash REST API) ────────────────────────────────────────────────
 
-def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+async def _redis(*args: Any) -> Any:
+    resp = await http_client.post(
+        UPSTASH_REDIS_REST_URL,
+        headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"},
+        json=list(args),
+    )
+    resp.raise_for_status()
+    return resp.json()["result"]
 
 
-def init_db() -> None:
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                email         TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at    TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS user_prefs (
-                user_id    INTEGER PRIMARY KEY,
-                prefs_json TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS news_cache (
-                cache_key  TEXT PRIMARY KEY,
-                payload    TEXT NOT NULL,
-                fetched_at TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS visitor_counter (
-                id            INTEGER PRIMARY KEY CHECK (id = 1),
-                unique_count  INTEGER NOT NULL,
-                total_visits  INTEGER NOT NULL
-            )
-        """)
-        conn.execute(
-            "INSERT OR IGNORE INTO visitor_counter (id, unique_count, total_visits) VALUES (1, 0, 0)"
-        )
-        conn.commit()
+async def _redis_pipeline(commands: list[list]) -> list:
+    resp = await http_client.post(
+        f"{UPSTASH_REDIS_REST_URL}/pipeline",
+        headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"},
+        json=commands,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ── Password hashing (PBKDF2-SHA256, 260k iterations) ────────────────────────
@@ -261,7 +239,42 @@ def current_user(request: Request) -> dict | None:
     return decode_token(auth[7:])
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
+# ── Auth: users in Redis ─────────────────────────────────────────────────────
+# user:email:{email} -> user id, claimed with SET NX so two concurrent
+# registrations for the same email can't both succeed. user:{id} -> JSON blob
+# {email, password_hash, created_at}.
+
+USER_ID_SEQ_KEY = "user_id_seq"
+
+
+async def _get_user_by_email(email: str) -> dict | None:
+    user_id = await _redis("GET", f"user:email:{email}")
+    if not user_id:
+        return None
+    raw = await _redis("GET", f"user:{user_id}")
+    if not raw:
+        return None
+    user = json.loads(raw)
+    user["id"] = int(user_id)
+    return user
+
+
+async def _create_user(email: str, password_hash: str) -> int | None:
+    user_id = await _redis("INCR", USER_ID_SEQ_KEY)
+    claimed = await _redis("SET", f"user:email:{email}", str(user_id), "NX")
+    if not claimed:
+        return None
+    await _redis(
+        "SET",
+        f"user:{user_id}",
+        json.dumps({
+            "email": email,
+            "password_hash": password_hash,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }),
+    )
+    return user_id
+
 
 async def register(request: Request) -> JSONResponse:
     try:
@@ -280,17 +293,13 @@ async def register(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Password too long"}, status_code=400)
 
     pw_hash = hash_password(password)
-    now = datetime.now(timezone.utc).isoformat()
 
     try:
-        with get_db() as conn:
-            cur = conn.execute(
-                "INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)",
-                (email, pw_hash, now),
-            )
-            user_id = cur.lastrowid
-            conn.commit()
-    except sqlite3.IntegrityError:
+        user_id = await _create_user(email, pw_hash)
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+
+    if user_id is None:
         return JSONResponse({"error": "Email already registered"}, status_code=409)
 
     return JSONResponse({"token": create_token(user_id, email), "email": email})
@@ -305,15 +314,15 @@ async def login(request: Request) -> JSONResponse:
     email = (body.get("email") or "").strip().lower()
     password = body.get("password") or ""
 
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id, password_hash FROM users WHERE email = ?", (email,)
-        ).fetchone()
+    try:
+        user = await _get_user_by_email(email)
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
 
-    if not row or not verify_password(password, row["password_hash"]):
+    if not user or not verify_password(password, user["password_hash"]):
         return JSONResponse({"error": "Invalid email or password"}, status_code=401)
 
-    return JSONResponse({"token": create_token(row["id"], email), "email": email})
+    return JSONResponse({"token": create_token(user["id"], email), "email": email})
 
 
 # ── Prefs routes ──────────────────────────────────────────────────────────────
@@ -326,11 +335,11 @@ async def prefs(request: Request) -> JSONResponse:
     user_id = int(user["sub"])
 
     if request.method == "GET":
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT prefs_json FROM user_prefs WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        return JSONResponse({"prefs": json.loads(row["prefs_json"]) if row else None})
+        try:
+            raw = await _redis("GET", f"prefs:{user_id}")
+        except httpx.HTTPError:
+            return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+        return JSONResponse({"prefs": json.loads(raw) if raw else None})
 
     # PUT
     try:
@@ -338,13 +347,10 @@ async def prefs(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO user_prefs (user_id, prefs_json) VALUES (?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET prefs_json = excluded.prefs_json""",
-            (user_id, json.dumps(body)),
-        )
-        conn.commit()
+    try:
+        await _redis("SET", f"prefs:{user_id}", json.dumps(body))
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
 
     return JSONResponse({"ok": True})
 
@@ -353,75 +359,59 @@ async def prefs(request: Request) -> JSONResponse:
 # The frontend claims a unique number once per browser (stored in localStorage)
 # and displays it forever after; total_visits bumps on every page load,
 # including repeat visits, so the widget can show both "you're visitor #X"
-# and "Y visits so far". Counters live in Upstash Redis (see UPSTASH_REDIS_REST_URL
-# above) when configured, since that's the piece that actually needs to survive
-# Render spin-downs; falls back to the local SQLite row otherwise.
+# and "Y visits so far".
 
 async def record_visit(request: Request) -> JSONResponse:
     body = await request.json() if await request.body() else {}
     claim = bool(body.get("claim"))
 
-    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
-        commands = [["INCR", "total_visits"]]
-        if claim:
-            commands.append(["INCR", "unique_count"])
-        try:
-            resp = await http_client.post(
-                f"{UPSTASH_REDIS_REST_URL}/pipeline",
-                headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"},
-                json=commands,
-            )
-            resp.raise_for_status()
-            results = resp.json()
-        except httpx.HTTPError:
-            return JSONResponse({"error": "Visitor counter unreachable"}, status_code=502)
-        total_visits = results[0]["result"]
-        # Frontend only reads `number` when claim=True, so no unique_count fetch otherwise.
-        unique_count = results[1]["result"] if claim else 0
-        return JSONResponse({"number": unique_count, "totalVisits": total_visits})
+    commands = [["INCR", "total_visits"]]
+    if claim:
+        commands.append(["INCR", "unique_count"])
+    try:
+        results = await _redis_pipeline(commands)
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Visitor counter unreachable"}, status_code=502)
 
-    with get_db() as conn:
-        if claim:
-            conn.execute(
-                "UPDATE visitor_counter SET unique_count = unique_count + 1, total_visits = total_visits + 1 WHERE id = 1"
-            )
-        else:
-            conn.execute("UPDATE visitor_counter SET total_visits = total_visits + 1 WHERE id = 1")
-        row = conn.execute(
-            "SELECT unique_count, total_visits FROM visitor_counter WHERE id = 1"
-        ).fetchone()
-        conn.commit()
-    return JSONResponse({"number": row["unique_count"], "totalVisits": row["total_visits"]})
+    total_visits = results[0]["result"]
+    # Frontend only reads `number` when claim=True, so no unique_count fetch otherwise.
+    unique_count = results[1]["result"] if claim else 0
+    return JSONResponse({"number": unique_count, "totalVisits": total_visits})
 
 
 # ── News routes ───────────────────────────────────────────────────────────────
 
-# Successful NewsAPI responses are cached in SQLite: served as-is while fresh
+# Successful NewsAPI responses are cached in Redis: served as-is while fresh
 # (no quota spent), and served stale — any age — when the upstream fails, so a
-# rate-limited key degrades to older headlines instead of an error.
+# rate-limited key degrades to older headlines instead of an error. Cache
+# entries are stored without a Redis TTL and freshness is checked in-app
+# (fetched_at), so a stale response is never simply evicted — it stays
+# available as a fallback indefinitely.
 # 3h keeps worst-case daily requests (11 cache keys x 24/3 refreshes) well under
 # the free-tier 100/day quota even under continuous traffic.
 NEWS_CACHE_TTL = timedelta(hours=3)
 
 
-def _news_cache_get(cache_key: str) -> tuple[dict, datetime] | None:
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT payload, fetched_at FROM news_cache WHERE cache_key = ?",
-            (cache_key,),
-        ).fetchone()
-    if not row:
+async def _news_cache_get(cache_key: str) -> tuple[dict, datetime] | None:
+    try:
+        raw = await _redis("GET", f"newscache:{cache_key}")
+    except httpx.HTTPError:
         return None
-    return json.loads(row["payload"]), datetime.fromisoformat(row["fetched_at"])
+    if not raw:
+        return None
+    entry = json.loads(raw)
+    return entry["payload"], datetime.fromisoformat(entry["fetched_at"])
 
 
-def _news_cache_put(cache_key: str, data: dict) -> None:
-    with get_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO news_cache (cache_key, payload, fetched_at) VALUES (?, ?, ?)",
-            (cache_key, json.dumps(data), datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
+async def _news_cache_put(cache_key: str, data: dict) -> None:
+    entry = json.dumps({
+        "payload": data,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        await _redis("SET", f"newscache:{cache_key}", entry)
+    except httpx.HTTPError:
+        pass
 
 
 async def _fetch_news(
@@ -437,7 +427,7 @@ async def _fetch_news(
     cache_key = hashlib.sha256(
         json.dumps([q, page_size, domains, exclude_domains]).encode()
     ).hexdigest()
-    cached = _news_cache_get(cache_key)
+    cached = await _news_cache_get(cache_key)
     if cached and datetime.now(timezone.utc) - cached[1] < NEWS_CACHE_TTL:
         return JSONResponse(cached[0])
 
@@ -476,7 +466,7 @@ async def _fetch_news(
         return JSONResponse({"error": "News service unreachable"}, status_code=502)
 
     if resp.status_code == 200 and data.get("status") == "ok":
-        _news_cache_put(cache_key, data)
+        await _news_cache_put(cache_key, data)
         return JSONResponse(data)
 
     # Upstream error (e.g. rate limit) — stale headlines beat an error card.
@@ -514,7 +504,8 @@ async def sport_news(request: Request) -> JSONResponse:
 # ── Upcoming games (TheSportsDB) ──────────────────────────────────────────────
 # Free, keyless API used only for the "Up Next" widget. Team/player name →
 # team id resolution rarely changes (cached 7 days); next fixtures change
-# after games are played (cached 2 hours). Reuses the news_cache table.
+# after games are played (cached 2 hours). Reuses the same Redis cache
+# helpers as the news cache, under a "tsdb:" key prefix.
 
 TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/123"
 TSDB_RESOLVE_TTL = timedelta(days=7)
@@ -523,14 +514,14 @@ TSDB_EVENT_TTL = timedelta(hours=2)
 
 async def _tsdb_get(url: str, ttl: timedelta) -> dict | None:
     cache_key = "tsdb:" + hashlib.sha256(url.encode()).hexdigest()
-    cached = _news_cache_get(cache_key)
+    cached = await _news_cache_get(cache_key)
     if cached and datetime.now(timezone.utc) - cached[1] < ttl:
         return cached[0]
     try:
         resp = await http_client.get(url)
         if resp.status_code == 200:
             data = resp.json()
-            _news_cache_put(cache_key, data)
+            await _news_cache_put(cache_key, data)
             return data
     except (httpx.HTTPError, ValueError):
         pass
@@ -656,7 +647,12 @@ async def next_games(request: Request) -> JSONResponse:
 
 @asynccontextmanager
 async def lifespan(app: Starlette):
-    init_db()
+    if not (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN):
+        raise RuntimeError(
+            "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required — "
+            "Redis is the only datastore now. Set them in .env for local dev "
+            "(a free Upstash database works fine for this)."
+        )
     global http_client
     http_client = httpx.AsyncClient(timeout=10.0)
     yield

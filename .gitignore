@@ -17,9 +17,6 @@ dist-ssr
 # Python
 __pycache__/
 
-# Local SQLite database (user accounts + news cache)
-users.db
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

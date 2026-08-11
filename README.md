@@ -15,7 +15,7 @@ Note: the app is hosted on Render's free tier, so it spins down after periods of
 - **Team filtering** — follow specific clubs, players, or programs (e.g. Arsenal, Knicks, Verstappen)
 - **Up Next widget** — sidebar showing the next scheduled game for every team and player you follow, powered by TheSportsDB (no NewsAPI quota used)
 - **Accounts** — register/log in to sync preferences across devices; guest mode falls back to `localStorage`
-- **Server-side caching** — SQLite-backed cache (3h TTL for news, hours-to-days for fixtures) keeps day-to-day browsing well under the NewsAPI free-tier quota, with stale-cache fallback if the API is down or rate-limited
+- **Server-side caching** — Redis-backed cache (3h TTL for news, hours-to-days for fixtures) keeps day-to-day browsing well under the NewsAPI free-tier quota, with stale-cache fallback if the API is down or rate-limited
 - **Backend proxy** — API key stays server-side; the browser never sees it
 - **Edit anytime** — "Edit" button in the header reopens the full onboarding flow
 
@@ -25,7 +25,7 @@ Note: the app is hosted on Render's free tier, so it spins down after periods of
 |---|---|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query, Framer Motion, Axios |
 | Backend | Python 3.12, uvicorn (ASGI), httpx, PyJWT (HS256), PBKDF2-SHA256 |
-| Persistence | SQLite (`users.db`) for users/prefs/news cache; Upstash Redis (REST) for the visitor counter in prod, so it survives Render spin-downs |
+| Persistence | Upstash Redis (REST API) — the sole datastore: users, prefs, news/fixtures cache, and visitor counter, so nothing resets on a Render spin-down |
 | Data sources | [NewsAPI](https://newsapi.org) (articles), [TheSportsDB](https://www.thesportsdb.com) (fixtures, free/keyless) |
 | Deployment | Docker (multi-stage build), Render (free tier, single web service) |
 
@@ -35,24 +35,28 @@ Sidelines runs as a single Docker service: a Python backend that serves both the
 
 ```
 Browser ── GET /        → static React app
-        └─ /api/*        → auth & prefs (SQLite) · news (NewsAPI, cached in SQLite)
-                            fixtures (TheSportsDB, cached in SQLite) · visitor count (Redis)
+        └─ /api/*        → auth & prefs (Redis) · news (NewsAPI, cached in Redis)
+                            fixtures (TheSportsDB, cached in Redis) · visitor count (Redis)
 ```
 
 - **Auth & prefs** — registration/login issue a JWT (stored client-side); a logged-in user's sport/team selections are saved server-side, while guests fall back to `localStorage` so the app still works without an account.
-- **News & fixtures** — the backend proxies every third-party call, so API keys never reach the browser. Each response is cached in SQLite and served from cache while fresh; if an upstream call fails or rate-limits, the last cached response is served regardless of age rather than showing an error.
-- **Visitor counter** — the one piece of state not in SQLite. It's backed by Upstash Redis in production because Render's free tier has no persistent disk — a redeploy wipes local SQLite, which would otherwise reset the count on every deploy.
+- **News & fixtures** — the backend proxies every third-party call, so API keys never reach the browser. Each response is cached in Redis, without a Redis-native TTL — freshness is checked in-app, so a stale response is never simply evicted; it's served as a fallback if an upstream call fails or rate-limits, rather than showing an error.
+- **Why Redis for everything** — Render's free tier has no persistent disk, so anything kept in a local file gets wiped on every redeploy. Redis is external and stateless from the app's perspective, so a redeploy or spin-down never loses users, prefs, or cache — this used to only cover the visitor counter, with the rest on a local SQLite file, until that same wipe-on-redeploy problem started hitting news caching too (see Issues below).
 - **Build & deploy** — a multi-stage Docker build compiles the frontend to static assets, then copies them into a slim Python image alongside the backend, so the shipped container has no Node runtime. In local dev, Vite proxies `/api/*` to the backend so both run side by side without CORS configuration.
 
-The frontend authenticates and manages sport/team preferences through the API, storing a JWT and a local copy of prefs in `localStorage` as a guest-mode fallback and offline cache. The backend proxies all third-party calls server-side — the NewsAPI key never reaches the browser — and caches every response in SQLite so repeat requests are served locally instead of re-hitting the upstream APIs, falling back to stale cached data if an upstream call fails. In dev, Vite proxies `/api/*` to the local backend so both run side by side without CORS setup; in prod, the Docker build compiles the frontend into static assets that the same backend process serves directly.
-
 ## Running locally
+
+Requires a free [Upstash](https://upstash.com) Redis database (500K commands/month free tier — more than enough for local dev) — Redis is the only datastore, so the backend won't start without it.
 
 ```bash
 # backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-echo "NEWS_API_KEY=your_key_here" > .env
+cat > .env <<EOF
+NEWS_API_KEY=your_key_here
+UPSTASH_REDIS_REST_URL=your_upstash_rest_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
+EOF
 uvicorn server:app --reload --port 8000
 
 # frontend (separate terminal)
@@ -62,7 +66,7 @@ npm run dev
 
 ## Issues run into (and fixes)
 
-**NewsAPI quota exhaustion.** The free NewsAPI tier caps out at 100 requests/day. Early on, the news cache TTL was only 30 minutes, and each unique combination of a user's followed teams minted its own cache key (a per-team query on top of the per-sport one) — so quota usage scaled with the user base instead of staying fixed. Once the app hit the daily cap, a routine redeploy wiped the SQLite file (Render's free tier has no persistent disk), which took the stale-cache fallback down with it and killed headlines for every sport at once. Fixed by (1) raising the cache TTL to 3 hours, keeping worst-case daily requests well under quota even under continuous traffic, and (2) dropping per-team NewsAPI queries entirely — the backend now always fetches the shared sport-wide result set, and team relevance is tagged client-side by scanning that set for followed-team mentions instead of firing a dedicated request per team combination.
+**NewsAPI quota exhaustion.** The free NewsAPI tier caps out at 100 requests/day. Early on, the news cache TTL was only 30 minutes, and each unique combination of a user's followed teams minted its own cache key (a per-team query on top of the per-sport one) — so quota usage scaled with the user base instead of staying fixed. Once the app hit the daily cap, a routine redeploy wiped the SQLite file the cache lived in at the time (Render's free tier has no persistent disk), which took the stale-cache fallback down with it and killed headlines for every sport at once. Fixed short-term by (1) raising the cache TTL to 3 hours, keeping worst-case daily requests well under quota even under continuous traffic, and (2) dropping per-team NewsAPI queries entirely — the backend now always fetches the shared sport-wide result set, with team relevance tagged client-side instead of firing a dedicated request per team combination. The root cause — anything on local disk getting wiped on redeploy — was fixed for good later by moving the whole datastore (users, prefs, and the cache) off SQLite onto Redis, the same fix already used for the visitor counter.
 
 **Article rendering: hero card collapse.** The top article in each sport section renders as a large "hero" card that spans two grid rows, sized implicitly by the four compact cards next to/below it. Sports with very few results (boxing had as little as one article on a given day) had no sibling cards to establish that second row's height, so the hero card collapsed to a ~14px sliver. Fixed by only rendering the hero variant when a section has at least 5 articles; below that, everything renders as compact cards.
 
