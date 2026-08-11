@@ -24,46 +24,22 @@ Note: the app is hosted on Render's free tier, so it spins down after periods of
 | Layer | Tech |
 |---|---|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, TanStack Query, Framer Motion, Axios |
-| Backend | Python 3.12, Starlette, uvicorn (ASGI), httpx |
-| Auth | PyJWT (HS256), PBKDF2-SHA256 password hashing |
-| Persistence | SQLite (`users.db`) — users, prefs, news cache, visitor counter |
-| Persistence (prod) | Upstash Redis (REST API) — visitor counter only, survives Render spin-downs |
+| Backend | Python 3.12, uvicorn (ASGI), httpx, PyJWT (HS256), PBKDF2-SHA256 |
+| Persistence | SQLite (`users.db`) for users/prefs/news cache; Upstash Redis (REST) for the visitor counter in prod, so it survives Render spin-downs |
 | Data sources | [NewsAPI](https://newsapi.org) (articles), [TheSportsDB](https://www.thesportsdb.com) (fixtures, free/keyless) |
 | Deployment | Docker (multi-stage build), Render (free tier, single web service) |
 
 ## Architecture
 
-Sidelines is a single Docker service: a Python/Starlette backend that serves both the JSON API and the built React static files. There's no separate frontend host and no database server — everything lives in one container.
+Sidelines runs as a single Docker service: a Python backend that serves both the JSON API and the built React static files, with no separate frontend host or database server.
 
 ```
-Browser
-  │
-  ├─ GET /                     → static React app (dist/)
-  └─ GET/POST /api/*           → Starlette ASGI app (server.py)
-                                    │
-                                    ├─ /api/auth/register, /api/auth/login   → SQLite users table, JWT issued
-                                    ├─ /api/prefs                            → SQLite user_prefs (JSON blob per user)
-                                    ├─ /api/visitor                          → Upstash Redis (prod) / SQLite (local)
-                                    ├─ /api/news/top, /api/news/sport/{id}   → NewsAPI, cached in SQLite news_cache
-                                    └─ /api/scores/next                      → TheSportsDB, cached in SQLite news_cache
+Browser ── GET /        → static React app
+        └─ /api/*        → auth & prefs (SQLite) · news (NewsAPI, cached in SQLite)
+                            fixtures (TheSportsDB, cached in SQLite) · visitor count (Redis)
 ```
 
-**Build**: `Dockerfile` is a two-stage build. Stage 1 (`node:20-slim`) runs `npm ci` and `vite build`, producing static assets in `dist/`. Stage 2 (`python:3.12-slim`) installs backend dependencies and copies only `server.py` and the built `dist/` output — no Node runtime ships in the final image. The container runs `uvicorn server:app` on `$PORT` (Render sets this; defaults to 8000 locally).
-
-**Backend (`server.py`)** — a single-file Starlette app:
-- **Auth** — `/api/auth/register` and `/api/auth/login` hash passwords with PBKDF2-SHA256 (260k iterations, random salt) and issue a 30-day JWT (HS256). `JWT_SECRET` comes from the environment in production; if unset, a random secret is generated at process start (tokens then reset on every restart — fine for local dev, not for prod).
-- **Preferences** — `/api/prefs` (GET/PUT) stores each user's selected sports/teams as a JSON blob in `user_prefs`, keyed by user id. Logged-out users get the same shape persisted to `localStorage` on the client instead.
-- **News proxy** — `/api/news/top` and `/api/news/sport/{sport_id}` call NewsAPI's `/v2/everything` endpoint server-side, so `NEWS_API_KEY` never reaches the browser. Each sport has a hand-tuned OR-query (e.g. tennis matches `tennis OR ATP OR WTA OR Wimbledon OR ...`) plus a curated allowlist of source domains (mainstream outlets like ESPN/CBS Sports plus sport-specific blogs, e.g. SB Nation team blogs for NBA). `searchIn=title` keeps results on-topic. Responses are cached in the `news_cache` SQLite table, keyed by a SHA-256 hash of the query params, and served from cache while fresh; if NewsAPI errors or rate-limits, the last cached response is served regardless of age.
-- **Fixtures** — `/api/scores/next` resolves each followed team/player to a TheSportsDB team ID (sport-aware, so "LA Rams" doesn't collide with an unrelated team of the same name), then fetches upcoming events. Tennis is special-cased: ATP/WTA don't expose per-player fixture lookups, so the tour's upcoming-match list is scanned for the player's name. Team-ID resolution is cached 7 days; fixtures are cached 2 hours.
-- **Visitor counter** — backed by Upstash Redis (REST API, no persistent connection) in production so the count survives Render's free-tier container restarts, which wipe the local SQLite file. Falls back to the SQLite `visitor_counter` table when Redis env vars are unset (e.g. local dev).
-
-**Frontend (`src/`)** — Vite + React 19 + TypeScript:
-- `App.tsx` — top-level state machine: onboarding (`SportPicker` → `TeamPicker`) vs. main feed, prefs loaded from `localStorage` or (if logged in) the server, with the server copy taking precedence once auth resolves.
-- `contexts/AuthContext.tsx` — JWT stored in `localStorage`, exposes login/register/logout and syncs prefs to the server on change.
-- `hooks/useNews.ts` — TanStack Query wrapper around the news endpoints (caching, retry, loading states on the client side, on top of the server-side cache).
-- `components/sports/SportSection.tsx` / `ArticleCard.tsx` — renders each sport's articles in a hero + compact grid; `components/sports/NextGameWidget.tsx` renders the "Up Next" sidebar.
-- `components/onboarding/` — two-step sport/team picker shown on first visit or via the header's "Edit" button.
-- In dev, Vite's dev server proxies `/api/*` to `http://localhost:8000` (see `vite.config.ts`), so `npm run dev` and `uvicorn server:app` run side by side without CORS configuration.
+The frontend authenticates and manages sport/team preferences through the API, storing a JWT and a local copy of prefs in `localStorage` as a guest-mode fallback and offline cache. The backend proxies all third-party calls server-side — the NewsAPI key never reaches the browser — and caches every response in SQLite so repeat requests are served locally instead of re-hitting the upstream APIs, falling back to stale cached data if an upstream call fails. In dev, Vite proxies `/api/*` to the local backend so both run side by side without CORS setup; in prod, the Docker build compiles the frontend into static assets that the same backend process serves directly.
 
 ## Running locally
 
