@@ -109,7 +109,7 @@ SPORT_DOMAINS: dict[str, str] = {
         "dailynorseman.com",         # Vikings
         "patspulpit.com",            # Patriots
         "windycitygridiron.com",     # Bears
-        "cincinnatijungle.com",      # Bengals
+        "cincyjungle.com",           # Bengals
         "thephinsider.com",          # Dolphins
         "silverandblackpride.com",   # Raiders
         "turfshowtimes.com",         # Rams
@@ -164,6 +164,50 @@ SPORT_DOMAINS: dict[str, str] = {
         "sherdog.com", "mmamania.com", "lowkickmma.com", "tapology.com",
         "fansided.com", "sbnation.com",
     ),
+}
+
+# Dedicated team blogs (SB Nation + USA Today Wire — domain-clean sources only;
+# A to Z Sports/On SI/Independent sites in the source list are single-domain
+# with per-team URL *paths*, which NewsAPI's `domains` filter can't scope to,
+# so they're left out here) for team_news below. Keyed by our own team ids
+# (constants/teams.ts), not the source list's ids or display names, since
+# those don't always match ours (e.g. our "rams" is named "LA Rams", not
+# "Los Angeles Rams"). Only sports/teams covered by the source list are here —
+# team_news falls back to the sport-wide SPORT_DOMAINS above for the rest
+# (tennis, soccer, F1, UFC, and any NFL/NBA/NCAA team not in this map).
+TEAM_BLOG_DOMAINS: dict[str, str] = {
+    # NFL
+    "patriots": _d("patspulpit.com", "patriotswire.usatoday.com"),
+    "cowboys":  _d("bloggingtheboys.com", "cowboyswire.usatoday.com"),
+    "packers":  _d("acmepackingcompany.com", "packerswire.usatoday.com"),
+    "49ers":    _d("ninersnation.com", "ninerswire.usatoday.com"),
+    "chiefs":   _d("arrowheadpride.com", "chiefswire.usatoday.com"),
+    "bills":    _d("buffalorumblings.com", "billswire.usatoday.com"),
+    "eagles":   _d("bleedinggreennation.com"),
+    "ravens":   _d("baltimorebeatdown.com", "ravenswire.usatoday.com"),
+    "giants":   _d("bigblueview.com", "giantswire.usatoday.com"),
+    "bears":    _d("windycitygridiron.com", "bearswire.usatoday.com"),
+    "rams":     _d("turfshowtimes.com", "theramswire.usatoday.com"),
+    "seahawks": _d("fieldgulls.com", "seahawkswire.usatoday.com"),
+    "raiders":  _d("silverandblackpride.com", "raiderswire.usatoday.com"),
+    "steelers": _d("behindthesteelcurtain.com", "steelerswire.usatoday.com"),
+    "bengals":  _d("cincyjungle.com"),
+    "dolphins": _d("thephinsider.com"),
+    "broncos":  _d("milehighreport.com", "broncoswire.usatoday.com"),
+    "vikings":  _d("dailynorseman.com", "vikingswire.usatoday.com"),
+    "texans":   _d("battleredblog.com", "texanswire.usatoday.com"),
+    "lions":    _d("prideofdetroit.com", "lionswire.usatoday.com"),
+    "colts":    _d("stampedeblue.com", "coltswire.usatoday.com"),
+    "jets":     _d("ganggreennation.com"),
+    # NBA
+    "celtics":  _d("celticsblog.com", "celticswire.usatoday.com"),
+    "warriors": _d("goldenstateofmind.com", "warriorswire.usatoday.com"),
+    "lakers":   _d("silverscreenandroll.com", "lakerswire.usatoday.com"),
+    "sixers":   _d("libertyballers.com"),
+    "knicks":   _d("postingandtoasting.com"),
+    "raptors":  _d("raptorshq.com"),
+    "spurs":    _d("poundingtherock.com"),
+    "rockets":  _d("rocketswire.usatoday.com"),
 }
 
 # Fallback blocklist used only for top_stories (broad multi-sport query)
@@ -387,9 +431,17 @@ async def record_visit(request: Request) -> JSONResponse:
 # entries are stored without a Redis TTL and freshness is checked in-app
 # (fetched_at), so a stale response is never simply evicted — it stays
 # available as a fallback indefinitely.
-# 3h keeps worst-case daily requests (11 cache keys x 24/3 refreshes) well under
-# the free-tier 100/day quota even under continuous traffic.
+# 3h keeps worst-case daily requests (8 cache keys x 24/3 refreshes = 64) well
+# under the free-tier 100/day quota even under continuous traffic, leaving
+# headroom for team_news below.
 NEWS_CACHE_TTL = timedelta(hours=3)
+
+# Per-team/player queries (see team_news below) are cached much longer than the
+# shared sport-wide queries: each distinct followed team is its own cache key,
+# lazily created the first time someone follows it, so a 24h TTL (1 refresh/day
+# per team) is what keeps a popular app's worth of distinct followed teams from
+# eating the same 100/day quota the shared queries already spend ~64/day of.
+TEAM_NEWS_CACHE_TTL = timedelta(hours=24)
 
 
 async def _news_cache_get(cache_key: str) -> tuple[dict, datetime] | None:
@@ -420,6 +472,8 @@ async def _fetch_news(
     *,
     domains: str | None = None,
     exclude_domains: str | None = None,
+    ttl: timedelta = NEWS_CACHE_TTL,
+    days: int = 3,
 ) -> JSONResponse:
     if not NEWS_API_KEY:
         return JSONResponse({"error": "NEWS_API_KEY not configured on server"}, status_code=500)
@@ -428,10 +482,12 @@ async def _fetch_news(
         json.dumps([q, page_size, domains, exclude_domains]).encode()
     ).hexdigest()
     cached = await _news_cache_get(cache_key)
-    if cached and datetime.now(timezone.utc) - cached[1] < NEWS_CACHE_TTL:
+    if cached and datetime.now(timezone.utc) - cached[1] < ttl:
         return JSONResponse(cached[0])
 
-    from_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
+    # `days` is capped at a week — anything older counts as stale news for this
+    # app, regardless of caller.
+    from_date = (datetime.now(timezone.utc) - timedelta(days=min(days, 7))).strftime("%Y-%m-%d")
     params: dict = {
         "q": q,
         "searchIn": "title",
@@ -489,15 +545,49 @@ async def sport_news(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"Unknown sport: {sport_id}"}, status_code=404)
     page_size = int(request.query_params.get("pageSize", "8"))
 
-    # Always the sport-wide query, never scoped to a user's followed teams — a
-    # per-team query would mint its own NewsAPI cache entry per unique team
-    # combination, multiplying quota usage with the user base instead of
-    # staying fixed. Team relevance is surfaced client-side by tagging articles
-    # from this shared set that mention a followed team (see detectTag).
+    # The sport-wide query, shared across all users regardless of who follows
+    # what — cache usage here stays fixed at one entry per sport. Dedicated
+    # per-team results come from team_news below instead of scoping this query,
+    # so this stays the fixed, cheap baseline even as followed teams vary.
     return await _fetch_news(
         SPORT_QUERIES[sport_id],
         page_size,
         domains=SPORT_DOMAINS.get(sport_id),
+    )
+
+
+async def team_news(request: Request) -> JSONResponse:
+    sport_id = request.path_params["sport_id"]
+    if sport_id not in SPORT_DOMAINS:
+        return JSONResponse({"error": f"Unknown sport: {sport_id}"}, status_code=404)
+
+    team = request.query_params.get("team", "").strip().replace('"', "")
+    if not team or len(team) > 80:
+        return JSONResponse({"error": "Missing or invalid 'team' query param"}, status_code=400)
+    team_id = request.query_params.get("teamId", "")
+
+    page_size = int(request.query_params.get("pageSize", "6"))
+
+    # One cache entry per (sport, team) pair, populated lazily the first time
+    # anyone follows that team — NOT per user or per team-combination, which is
+    # what caused the 2026-07-29 quota-exhaustion outage. Cached for
+    # TEAM_NEWS_CACHE_TTL (24h, much longer than the shared sport query) so this
+    # stays within the free-tier quota's remaining headroom even as more
+    # distinct teams get followed across the user base.
+    #
+    # Prefer the team's own dedicated blogs (TEAM_BLOG_DOMAINS) over the broad
+    # sport-wide allowlist — those blogs write almost exclusively about this
+    # one team, so results are far more relevant than filtering the general
+    # feed. Falls back to SPORT_DOMAINS for teams/sports the blog list doesn't
+    # cover. Window is widened to 7 days (vs. the 3-day default) since a single
+    # team blog posts less often than a wire service; 7 days is also this app's
+    # hard ceiling for "not stale," so this is as wide as it's allowed to go.
+    return await _fetch_news(
+        f'"{team}"',
+        page_size,
+        domains=TEAM_BLOG_DOMAINS.get(team_id) or SPORT_DOMAINS.get(sport_id),
+        ttl=TEAM_NEWS_CACHE_TTL,
+        days=7,
     )
 
 
@@ -666,6 +756,7 @@ routes = [
     Route("/api/visitor", record_visit, methods=["POST"]),
     Route("/api/news/top", top_stories),
     Route("/api/news/sport/{sport_id}", sport_news),
+    Route("/api/news/team/{sport_id}", team_news),
     Route("/api/scores/next", next_games),
 ]
 

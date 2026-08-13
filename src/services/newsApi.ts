@@ -16,3 +16,15 @@ export async function fetchTopStories(): Promise<NewsApiResponse> {
   const { data } = await axios.get<NewsApiResponse>('/api/news/top');
   return data;
 }
+
+export async function fetchArticlesByTeam(
+  sportId: string,
+  teamId: string,
+  team: string,
+  pageSize = 6
+): Promise<NewsApiResponse> {
+  const { data } = await axios.get<NewsApiResponse>(`/api/news/team/${sportId}`, {
+    params: { teamId, team, pageSize },
+  });
+  return data;
+}

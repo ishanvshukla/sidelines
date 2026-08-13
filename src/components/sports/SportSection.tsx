@@ -1,6 +1,6 @@
 import type { SportId, Article } from '../../types/news';
 import { SPORT_MAP } from '../../constants/sports';
-import { useSportNews } from '../../hooks/useNews';
+import { useSportNews, useTeamNews } from '../../hooks/useNews';
 import { allItemsForSport } from '../../constants/teams';
 import ArticleCard from './ArticleCard';
 import SkeletonCard from '../ui/SkeletonCard';
@@ -19,6 +19,10 @@ export default function SportSection({ sportId, teamIds }: Props) {
     ? allItemsForSport(sportId).filter((item) => teamIds.includes(item.id))
     : [];
 
+  // Dedicated per-team queries (see team_news in server.py) — reliable results
+  // for followed teams instead of hoping they land in the shared feed below.
+  const { tagged: dedicatedTagged } = useTeamNews(sportId, selectedItems);
+
   function detectTag(article: Article): string | null {
     if (selectedItems.length === 0) return null;
     const haystack = `${article.title} ${article.description ?? ''}`.toLowerCase();
@@ -33,12 +37,16 @@ export default function SportSection({ sportId, teamIds }: Props) {
     return null;
   }
 
-  // The feed is the sport's general headlines, not a dedicated per-team search (see
-  // sport_news in server.py), so a followed team's articles can land anywhere in
-  // publish order. Float tagged matches to the front (stable sort keeps recency
-  // order within each group) so they survive the slice(0, 16) below instead of
-  // being pushed off-grid by untagged headlines.
-  const tagged = articles?.map((article) => ({ article, tag: detectTag(article) })) ?? [];
+  // Dedicated team results take priority; the shared feed fills in the rest and
+  // acts as a fallback (via detectTag) for teams whose dedicated query is still
+  // loading, failed, or simply came back empty. Float tagged matches to the
+  // front (stable sort keeps recency order within each group) so they survive
+  // the slice(0, 16) below instead of being pushed off-grid.
+  const seenUrls = new Set(dedicatedTagged.map(({ article }) => article.url));
+  const sharedTagged = (articles ?? [])
+    .filter((article) => !seenUrls.has(article.url))
+    .map((article) => ({ article, tag: detectTag(article) }));
+  const tagged = [...dedicatedTagged, ...sharedTagged];
   const displayItems = [...tagged].sort((a, b) => Number(!a.tag) - Number(!b.tag)).slice(0, 16);
 
   return (

@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { fetchArticlesBySport, fetchTopStories } from '../services/newsApi';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { fetchArticlesByTeam, fetchArticlesBySport, fetchTopStories } from '../services/newsApi';
 import { fetchNextGames } from '../services/scoresApi';
 import { followedEntities } from '../constants/teams';
-import type { Article, Prefs, SportId } from '../types/news';
+import type { Article, Prefs, SportId, Team } from '../types/news';
 
 // Known non-news/shopping domains that may still slip through the backend filter
 const BLOCKED_DOMAINS = new Set([
@@ -62,4 +62,31 @@ export function useSportNews(sportId: SportId) {
     },
     staleTime: 5 * 60 * 1000,
   });
+}
+
+export interface TaggedArticle {
+  article: Article;
+  tag: string;
+}
+
+// One dedicated (long-cached, server-side) query per followed team/player,
+// so a favorite team's articles show up reliably instead of depending on
+// whether they happened to land in the shared sport-wide feed.
+export function useTeamNews(sportId: SportId, teams: Team[]): { tagged: TaggedArticle[]; isLoading: boolean } {
+  const results = useQueries({
+    queries: teams.map((team) => ({
+      queryKey: ['team', sportId, team.id],
+      queryFn: async () => {
+        const data = await fetchArticlesByTeam(sportId, team.id, team.searchTerm);
+        return filterValidArticles(data.articles);
+      },
+      staleTime: 30 * 60 * 1000,
+    })),
+  });
+
+  const tagged = results.flatMap((result, i) =>
+    (result.data ?? []).map((article) => ({ article, tag: teams[i].name }))
+  );
+  const isLoading = teams.length > 0 && results.every((r) => r.isLoading);
+  return { tagged, isLoading };
 }
