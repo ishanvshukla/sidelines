@@ -22,6 +22,7 @@ export default function TeamPicker({ sports, initialTeams, onConfirm, onBack }: 
   });
 
   const sportsWithConfig = sports.filter((id) => SPORT_TEAMS[id]);
+  const hasAnyTeamSelected = Object.values(selected).some((ids) => ids.length > 0);
 
   return (
     <div className="min-h-screen bg-espn-dark px-4 py-12">
@@ -111,7 +112,7 @@ export default function TeamPicker({ sports, initialTeams, onConfirm, onBack }: 
             onClick={() => onConfirm(selected)}
             className="font-oswald uppercase tracking-widest text-sm px-10 py-3 rounded-lg transition-all duration-150 bg-gold text-black hover:bg-gold-bright"
           >
-            Start Reading →
+            {hasAnyTeamSelected ? 'Start Reading →' : 'Skip to News'}
           </button>
         </div>
       </div>

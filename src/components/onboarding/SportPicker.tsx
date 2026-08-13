@@ -61,7 +61,7 @@ export default function SportPicker({ onConfirm, initial = [] }: Props) {
                   ✓
                 </span>
               )}
-              <span style={{ color: isSelected ? sport.color : '#555545' }}>
+              <span style={{ color: sport.color }}>
                 <SportIcon sportId={sport.id} size={36} />
               </span>
               <span
