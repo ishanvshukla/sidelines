@@ -1,6 +1,8 @@
 import type { Prefs } from '../types/news';
 
-const BASE = 'http://localhost:8000';
+// Relative paths: same-origin in production (the API server serves dist/),
+// proxied to the API server by Vite in dev (see vite.config.ts).
+const BASE = '';
 
 export interface AuthResponse {
   token: string;
