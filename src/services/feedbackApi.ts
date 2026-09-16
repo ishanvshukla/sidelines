@@ -2,6 +2,9 @@ import type { Prefs } from '../types/news';
 import type { FeedbackCategoryId } from '../constants/feedback';
 
 export interface FeedbackItem {
+  // Absent on reports filed before ids/statuses existed
+  id?: string;
+  status?: 'open' | 'fixed';
   category: string;
   message: string;
   email: string | null;
@@ -45,6 +48,21 @@ export async function fetchFeedbackAccess(token: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Marks a report fixed; resolves to whether the reporter was emailed. */
+export async function resolveFeedback(token: string, id: string): Promise<boolean> {
+  const res = await fetch('/api/feedback/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to mark as fixed');
+  }
+  const data = (await res.json()) as { notified: boolean };
+  return data.notified;
 }
 
 export async function fetchFeedbackInbox(token: string): Promise<FeedbackInbox> {

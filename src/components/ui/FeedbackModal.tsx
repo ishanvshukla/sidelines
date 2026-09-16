@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function FeedbackModal({ prefs, onClose }: Props) {
-  const { token } = useAuth();
+  const { token, isLoggedIn } = useAuth();
   const [category, setCategory] = useState<FeedbackCategoryId | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -61,7 +61,9 @@ export default function FeedbackModal({ prefs, onClose }: Props) {
           <div className="px-6 py-10 text-center">
             <p className="font-oswald uppercase tracking-wider text-gold mb-2">Thanks!</p>
             <p className="text-gray-400 text-sm font-inter mb-6">
-              Your report is in — we'll look into it.
+              {isLoggedIn
+                ? "Your report is in — we'll email you when it's fixed."
+                : "Your report is in — we'll look into it."}
             </p>
             <button
               onClick={onClose}
@@ -106,6 +108,12 @@ export default function FeedbackModal({ prefs, onClose }: Props) {
             {error && (
               <p className="mb-4 text-red-400 text-xs font-inter text-center bg-red-400/10 rounded-lg py-2 px-3">
                 {error}
+              </p>
+            )}
+
+            {!isLoggedIn && (
+              <p className="mb-4 text-gray-600 text-xs font-inter text-center">
+                You're reporting anonymously — sign in first to get an email when it's fixed.
               </p>
             )}
 

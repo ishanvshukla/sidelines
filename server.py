@@ -60,16 +60,26 @@ if not ADMIN_EMAILS:
     print("WARNING: ADMIN_EMAILS not set — no account can read the feedback inbox. Add ADMIN_EMAILS to .env")
 
 # Mirrored by FEEDBACK_CATEGORIES in src/constants/feedback.ts — keep in sync.
-FEEDBACK_CATEGORIES = {
-    "articles-not-loading",
-    "irrelevant-articles",
-    "scores-wrong-team",
-    "sign-in-issues",
-    "other",
+FEEDBACK_CATEGORY_LABELS = {
+    "articles-not-loading": "Articles aren't loading",
+    "irrelevant-articles": "My team's articles aren't relevant",
+    "scores-wrong-team": "Scores widget shows the wrong team",
+    "sign-in-issues": "Trouble signing in",
+    "other": "Other",
 }
+FEEDBACK_CATEGORIES = set(FEEDBACK_CATEGORY_LABELS)
 FEEDBACK_KEY = "feedback"
 FEEDBACK_MAX_ENTRIES = 500
 FEEDBACK_MAX_MESSAGE = 1000
+
+# Email notifications for feedback, via Brevo's HTTP API — HTTPS only, so it
+# works on hosts that block outbound SMTP ports, and its free tier covers this
+# app's volume. FEEDBACK_FROM_EMAIL must be a sender address verified in the
+# Brevo account. Left unset, notifications are skipped and feedback still works.
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+FEEDBACK_FROM_EMAIL = os.environ.get("FEEDBACK_FROM_EMAIL", "")
+if not (BREVO_API_KEY and FEEDBACK_FROM_EMAIL):
+    print("WARNING: BREVO_API_KEY / FEEDBACK_FROM_EMAIL not set — feedback email notifications are disabled.")
 
 SPORT_QUERIES: dict[str, str] = {
     "tennis": 'tennis OR ATP OR WTA OR Wimbledon OR "US Open" OR "French Open" OR "Australian Open"',
@@ -436,6 +446,27 @@ def _is_admin(request: Request) -> bool:
     return bool(user) and user.get("email", "").lower() in ADMIN_EMAILS
 
 
+async def _send_email(to: str, subject: str, text: str) -> bool:
+    """Best-effort email via Brevo. Never raises — a failed or unconfigured
+    email must not fail the request that triggered it."""
+    if not (BREVO_API_KEY and FEEDBACK_FROM_EMAIL):
+        return False
+    try:
+        resp = await http_client.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": BREVO_API_KEY},
+            json={
+                "sender": {"name": "Sidelines", "email": FEEDBACK_FROM_EMAIL},
+                "to": [{"email": to}],
+                "subject": subject,
+                "textContent": text,
+            },
+        )
+        return resp.status_code < 300
+    except httpx.HTTPError:
+        return False
+
+
 async def feedback(request: Request) -> JSONResponse:
     if request.method == "GET":
         if not _is_admin(request):
@@ -479,21 +510,35 @@ async def feedback(request: Request) -> JSONResponse:
     }
 
     user = current_user(request)  # optional — anonymous reports are accepted
-    entry = json.dumps({
+    report = {
+        "id": secrets.token_hex(8),
+        "status": "open",
         "category": category,
         "message": message,
         "email": user.get("email") if user else None,
         "sports": sports,
         "teams": teams,
         "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    }
     try:
         await _redis_pipeline([
-            ["LPUSH", FEEDBACK_KEY, entry],
+            ["LPUSH", FEEDBACK_KEY, json.dumps(report)],
             ["LTRIM", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1],
         ])
     except httpx.HTTPError:
         return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+
+    # Best-effort admin heads-up — a failed email never fails the report.
+    label = FEEDBACK_CATEGORY_LABELS[category]
+    lines = [f"Category: {label}", f"Reporter: {report['email'] or 'anonymous'}"]
+    if message:
+        lines.append(f"Message: {message}")
+    if teams:
+        lines.append("Follows: " + " | ".join(f"{s}: {', '.join(t)}" for s, t in teams.items()))
+    lines.append("\nOpen the feedback inbox on the site to mark it fixed.")
+    for admin_email in ADMIN_EMAILS:
+        await _send_email(admin_email, f"Sidelines: new issue report — {label}", "\n".join(lines))
+
     return JSONResponse({"ok": True})
 
 
@@ -501,6 +546,60 @@ async def feedback_access(request: Request) -> JSONResponse:
     """Lets the frontend decide whether to show the admin inbox link without
     downloading the inbox itself."""
     return JSONResponse({"admin": _is_admin(request)})
+
+
+# Flips one report's status to "fixed" atomically, so a concurrent LPUSH can't
+# shift indices between finding the entry and LSET-ing it. Matching and the
+# status flip both work on the exact json.dumps byte sequences (quotes inside
+# a user's message are escaped as \" in storage, so neither needle can appear
+# inside one). Returns the entry as it was BEFORE the flip, so the caller can
+# tell an already-fixed report from a freshly fixed one.
+_RESOLVE_SCRIPT = """
+local items = redis.call('LRANGE', KEYS[1], 0, -1)
+local needle = '"id": "' .. ARGV[1] .. '"'
+for i, raw in ipairs(items) do
+  if string.find(raw, needle, 1, true) then
+    redis.call('LSET', KEYS[1], i - 1, (string.gsub(raw, '"status": "open"', '"status": "fixed"', 1)))
+    return raw
+  end
+end
+return false
+"""
+
+
+async def resolve_feedback(request: Request) -> JSONResponse:
+    if not _is_admin(request):
+        return JSONResponse({"error": "Forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    report_id = str(body.get("id") or "")
+    if len(report_id) != 16 or any(c not in "0123456789abcdef" for c in report_id):
+        return JSONResponse({"error": "Invalid report id"}, status_code=400)
+
+    try:
+        prev_raw = await _redis("EVAL", _RESOLVE_SCRIPT, 1, FEEDBACK_KEY, report_id)
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+    if not prev_raw:
+        return JSONResponse({"error": "Report not found"}, status_code=404)
+
+    # Notify the reporter — only on the first fix (not re-clicks), and only
+    # if they were signed in when they reported.
+    prev = json.loads(prev_raw)
+    notified = False
+    if prev.get("status") == "open" and prev.get("email"):
+        label = FEEDBACK_CATEGORY_LABELS.get(prev.get("category"), prev.get("category"))
+        text = (
+            "Good news — the issue you reported on Sidelines has been fixed.\n\n"
+            f"Your report: {label}"
+            + (f'\n"{prev["message"]}"' if prev.get("message") else "")
+            + "\n\nThanks for helping make the site better!"
+        )
+        notified = await _send_email(prev["email"], "Your Sidelines report has been fixed", text)
+    return JSONResponse({"ok": True, "notified": notified})
 
 
 # ── Visitor counter ───────────────────────────────────────────────────────────
@@ -859,6 +958,7 @@ routes = [
     Route("/api/visitor", record_visit, methods=["POST"]),
     Route("/api/feedback", feedback, methods=["GET", "POST"]),
     Route("/api/feedback/access", feedback_access),
+    Route("/api/feedback/resolve", resolve_feedback, methods=["POST"]),
     Route("/api/news/top", top_stories),
     Route("/api/news/sport/{sport_id}", sport_news),
     Route("/api/news/team/{sport_id}", team_news),

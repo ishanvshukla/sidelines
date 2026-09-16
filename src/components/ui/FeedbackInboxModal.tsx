@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FEEDBACK_CATEGORY_LABELS } from '../../constants/feedback';
-import { fetchFeedbackInbox, type FeedbackInbox } from '../../services/feedbackApi';
+import { fetchFeedbackInbox, resolveFeedback, type FeedbackInbox } from '../../services/feedbackApi';
 
 interface Props {
   onClose(): void;
@@ -18,6 +18,28 @@ export default function FeedbackInboxModal({ onClose }: Props) {
   const { token } = useAuth();
   const [inbox, setInbox] = useState<FeedbackInbox | null>(null);
   const [error, setError] = useState('');
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [notifiedIds, setNotifiedIds] = useState<Set<string>>(new Set());
+
+  async function handleResolve(id: string) {
+    if (!token) return;
+    setError('');
+    setResolvingId(id);
+    try {
+      const notified = await resolveFeedback(token, id);
+      if (notified) setNotifiedIds((prev) => new Set(prev).add(id));
+      setInbox((prev) =>
+        prev && {
+          ...prev,
+          items: prev.items.map((it) => (it.id === id ? { ...it, status: 'fixed' } : it)),
+        }
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to mark as fixed');
+    } finally {
+      setResolvingId(null);
+    }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -111,6 +133,24 @@ export default function FeedbackInboxModal({ onClose }: Props) {
                         .join(' · ')}
                     </p>
                   )}
+                  <div className="mt-2 flex items-center gap-2">
+                    {item.status === 'fixed' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-xs font-oswald uppercase tracking-wider">
+                        Fixed
+                        {item.id && notifiedIds.has(item.id) && (
+                          <span className="normal-case tracking-normal font-inter text-green-500/80"> · reporter emailed</span>
+                        )}
+                      </span>
+                    ) : item.id ? (
+                      <button
+                        onClick={() => handleResolve(item.id!)}
+                        disabled={resolvingId === item.id}
+                        className="px-3 py-1 rounded border border-espn-border text-xs font-oswald uppercase tracking-wider text-gray-400 hover:text-gold hover:border-gold-dim transition-colors disabled:opacity-50"
+                      >
+                        {resolvingId === item.id ? 'Marking…' : 'Mark as fixed'}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>

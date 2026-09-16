@@ -18,3 +18,7 @@ services:
         sync: false
       - key: ADMIN_EMAILS
         sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: FEEDBACK_FROM_EMAIL
+        sync: false
