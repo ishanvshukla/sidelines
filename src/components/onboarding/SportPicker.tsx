@@ -33,7 +33,7 @@ export default function SportPicker({ onConfirm, initial = [] }: Props) {
         <span className="text-xs font-oswald font-semibold uppercase tracking-widest text-gold-dim">Step 1 of 2</span>
       </div>
       <h1 className="font-heading font-black text-4xl md:text-5xl text-white uppercase tracking-wide text-center mb-2">
-        What sports do you follow?
+        Choose your sport(s)
       </h1>
       <p className="text-gray-500 text-sm font-inter mb-10 text-center">
         Select all that interest you — you can change this any time.

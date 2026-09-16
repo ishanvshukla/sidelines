@@ -7,6 +7,9 @@ import SportPicker from './components/onboarding/SportPicker';
 import TeamPicker from './components/onboarding/TeamPicker';
 import AuthModal from './components/auth/AuthModal';
 import VisitorCounter from './components/ui/VisitorCounter';
+import FeedbackModal from './components/ui/FeedbackModal';
+import FeedbackInboxModal from './components/ui/FeedbackInboxModal';
+import { fetchFeedbackAccess } from './services/feedbackApi';
 
 import type { SportId, Prefs } from './types/news';
 import { SPORT_MAP } from './constants/sports';
@@ -43,6 +46,23 @@ type Step = 'pick-sports' | 'pick-teams' | 'main';
 function AppContent() {
   const auth = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [showInbox, setShowInbox] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // The server decides who may read the feedback inbox (ADMIN_EMAILS);
+  // this just asks so the footer knows whether to show the link.
+  useEffect(() => {
+    if (!auth.token) {
+      setIsAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    fetchFeedbackAccess(auth.token).then((admin) => {
+      if (!cancelled) setIsAdmin(admin);
+    });
+    return () => { cancelled = true; };
+  }, [auth.token]);
 
   // Prefer server prefs if logged in, otherwise fall back to localStorage
   const [prefs, setPrefs] = useState<Prefs | null>(() => {
@@ -172,9 +192,27 @@ function AppContent() {
           </a>
           {' — '}Data is for personal/development use only.
         </p>
+        <div className="mt-3 flex items-center justify-center gap-4">
+          <button
+            onClick={() => setShowFeedback(true)}
+            className="text-gray-500 hover:text-gold underline transition-colors"
+          >
+            Report an issue
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowInbox(true)}
+              className="text-gray-500 hover:text-gold underline transition-colors"
+            >
+              Feedback inbox
+            </button>
+          )}
+        </div>
       </footer>
 
       {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} />}
+      {showFeedback && <FeedbackModal prefs={prefs} onClose={() => setShowFeedback(false)} />}
+      {showInbox && <FeedbackInboxModal onClose={() => setShowInbox(false)} />}
       <VisitorCounter />
     </div>
   );

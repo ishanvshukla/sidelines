@@ -51,6 +51,26 @@ if not GOOGLE_CLIENT_ID:
 GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 _google_jwks_client = jwt.PyJWKClient(GOOGLE_JWKS_URL)
 
+# Feedback inbox access: comma-separated list of Google account emails allowed
+# to read submitted reports. Anyone can submit; only these accounts can read.
+ADMIN_EMAILS = {
+    e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()
+}
+if not ADMIN_EMAILS:
+    print("WARNING: ADMIN_EMAILS not set — no account can read the feedback inbox. Add ADMIN_EMAILS to .env")
+
+# Mirrored by FEEDBACK_CATEGORIES in src/constants/feedback.ts — keep in sync.
+FEEDBACK_CATEGORIES = {
+    "articles-not-loading",
+    "irrelevant-articles",
+    "scores-wrong-team",
+    "sign-in-issues",
+    "other",
+}
+FEEDBACK_KEY = "feedback"
+FEEDBACK_MAX_ENTRIES = 500
+FEEDBACK_MAX_MESSAGE = 1000
+
 SPORT_QUERIES: dict[str, str] = {
     "tennis": 'tennis OR ATP OR WTA OR Wimbledon OR "US Open" OR "French Open" OR "Australian Open"',
     "basketball": "basketball OR NBA",
@@ -403,6 +423,84 @@ async def prefs(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
 
     return JSONResponse({"ok": True})
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
+# Reports live in one capped Redis list, newest first. Submitting is open to
+# everyone — signed in or not, since the person hitting a bug may be the one
+# who can't sign in — while reading is restricted to ADMIN_EMAILS accounts.
+
+
+def _is_admin(request: Request) -> bool:
+    user = current_user(request)
+    return bool(user) and user.get("email", "").lower() in ADMIN_EMAILS
+
+
+async def feedback(request: Request) -> JSONResponse:
+    if request.method == "GET":
+        if not _is_admin(request):
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
+        try:
+            raw_items = await _redis("LRANGE", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1)
+        except httpx.HTTPError:
+            return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+        items = [json.loads(raw) for raw in raw_items or []]
+        counts: dict[str, int] = {}
+        for item in items:
+            cat = item.get("category", "other")
+            counts[cat] = counts.get(cat, 0) + 1
+        return JSONResponse({"items": items, "counts": counts})
+
+    # POST
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    category = body.get("category")
+    if category not in FEEDBACK_CATEGORIES:
+        return JSONResponse({"error": "Unknown category"}, status_code=400)
+
+    message = str(body.get("message") or "").strip()[:FEEDBACK_MAX_MESSAGE]
+    if category == "other" and not message:
+        return JSONResponse({"error": "Please describe what went wrong"}, status_code=400)
+
+    # The reporter's followed sports/teams travel with the report — most
+    # categories are only debuggable knowing which team's query misbehaved.
+    # Client-supplied, so shapes and sizes are clamped before storing.
+    prefs = body.get("prefs") if isinstance(body.get("prefs"), dict) else {}
+    raw_sports = prefs.get("sports") if isinstance(prefs.get("sports"), list) else []
+    raw_teams = prefs.get("teams") if isinstance(prefs.get("teams"), dict) else {}
+    sports = [str(s)[:40] for s in raw_sports[:12]]
+    teams = {
+        str(k)[:40]: [str(t)[:60] for t in v[:20]]
+        for k, v in list(raw_teams.items())[:12]
+        if isinstance(v, list)
+    }
+
+    user = current_user(request)  # optional — anonymous reports are accepted
+    entry = json.dumps({
+        "category": category,
+        "message": message,
+        "email": user.get("email") if user else None,
+        "sports": sports,
+        "teams": teams,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        await _redis_pipeline([
+            ["LPUSH", FEEDBACK_KEY, entry],
+            ["LTRIM", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1],
+        ])
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+    return JSONResponse({"ok": True})
+
+
+async def feedback_access(request: Request) -> JSONResponse:
+    """Lets the frontend decide whether to show the admin inbox link without
+    downloading the inbox itself."""
+    return JSONResponse({"admin": _is_admin(request)})
 
 
 # ── Visitor counter ───────────────────────────────────────────────────────────
@@ -759,6 +857,8 @@ routes = [
     Route("/api/auth/google", google_auth, methods=["POST"]),
     Route("/api/prefs", prefs, methods=["GET", "PUT"]),
     Route("/api/visitor", record_visit, methods=["POST"]),
+    Route("/api/feedback", feedback, methods=["GET", "POST"]),
+    Route("/api/feedback/access", feedback_access),
     Route("/api/news/top", top_stories),
     Route("/api/news/sport/{sport_id}", sport_news),
     Route("/api/news/team/{sport_id}", team_news),

@@ -1,0 +1,57 @@
+import type { Prefs } from '../types/news';
+import type { FeedbackCategoryId } from '../constants/feedback';
+
+export interface FeedbackItem {
+  category: string;
+  message: string;
+  email: string | null;
+  sports: string[];
+  teams: Record<string, string[]>;
+  created_at: string;
+}
+
+export interface FeedbackInbox {
+  items: FeedbackItem[];
+  counts: Record<string, number>;
+}
+
+function authHeaders(token: string | null): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function submitFeedback(
+  category: FeedbackCategoryId,
+  message: string,
+  prefs: Prefs | null,
+  token: string | null
+): Promise<void> {
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ category, message, prefs }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to send feedback');
+  }
+}
+
+export async function fetchFeedbackAccess(token: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/feedback/access', { headers: authHeaders(token) });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { admin: boolean };
+    return data.admin;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchFeedbackInbox(token: string): Promise<FeedbackInbox> {
+  const res = await fetch('/api/feedback', { headers: authHeaders(token) });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to load feedback');
+  }
+  return (await res.json()) as FeedbackInbox;
+}
