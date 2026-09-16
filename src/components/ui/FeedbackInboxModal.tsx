@@ -20,20 +20,33 @@ export default function FeedbackInboxModal({ onClose }: Props) {
   const [error, setError] = useState('');
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [notifiedIds, setNotifiedIds] = useState<Set<string>>(new Set());
+  // Which report's "Fixed Issue" form is open, and what's typed in it
+  const [openFormId, setOpenFormId] = useState<string | null>(null);
+  const [note, setNote] = useState('');
+
+  function openForm(id: string) {
+    setOpenFormId(id);
+    setNote('');
+    setError('');
+  }
 
   async function handleResolve(id: string) {
     if (!token) return;
     setError('');
     setResolvingId(id);
     try {
-      const notified = await resolveFeedback(token, id);
+      const notified = await resolveFeedback(token, id, note.trim());
       if (notified) setNotifiedIds((prev) => new Set(prev).add(id));
       setInbox((prev) =>
         prev && {
           ...prev,
-          items: prev.items.map((it) => (it.id === id ? { ...it, status: 'fixed' } : it)),
+          items: prev.items.map((it) =>
+            it.id === id ? { ...it, status: 'fixed', note: note.trim() } : it
+          ),
         }
       );
+      setOpenFormId(null);
+      setNote('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to mark as fixed');
     } finally {
@@ -133,21 +146,65 @@ export default function FeedbackInboxModal({ onClose }: Props) {
                         .join(' · ')}
                     </p>
                   )}
-                  <div className="mt-2 flex items-center gap-2">
+                  <div className="mt-2">
                     {item.status === 'fixed' ? (
-                      <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-xs font-oswald uppercase tracking-wider">
-                        Fixed
-                        {item.id && notifiedIds.has(item.id) && (
-                          <span className="normal-case tracking-normal font-inter text-green-500/80"> · reporter emailed</span>
+                      <>
+                        <span className="inline-block px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-xs font-oswald uppercase tracking-wider">
+                          Fixed
+                          {item.id && notifiedIds.has(item.id) && (
+                            <span className="normal-case tracking-normal font-inter text-green-500/80"> · reporter emailed</span>
+                          )}
+                        </span>
+                        {item.note && (
+                          <p className="mt-1.5 text-gray-400 text-xs font-inter italic whitespace-pre-wrap break-words">
+                            Your reply: {item.note}
+                          </p>
                         )}
-                      </span>
+                      </>
+                    ) : openFormId === item.id ? (
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          value={note}
+                          onChange={(e) => setNote(e.target.value)}
+                          maxLength={1000}
+                          rows={2}
+                          autoFocus
+                          placeholder={
+                            item.email
+                              ? 'Message to the reporter (optional)…'
+                              : 'Anonymous report — no one to email, but you can note what you did.'
+                          }
+                          className="w-full px-3 py-2 rounded-lg bg-espn-dark border border-espn-border text-sm font-inter text-white placeholder-gray-600 focus:outline-none focus:border-gold-dim resize-none"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleResolve(item.id!)}
+                            disabled={resolvingId === item.id}
+                            className="px-3 py-1 rounded bg-gold text-black text-xs font-oswald uppercase tracking-wider hover:bg-gold-bright transition-colors disabled:opacity-50"
+                          >
+                            {resolvingId === item.id
+                              ? 'Sending…'
+                              : item.email
+                                ? 'Send & mark fixed'
+                                : 'Mark fixed'}
+                          </button>
+                          <button
+                            onClick={() => { setOpenFormId(null); setNote(''); }}
+                            className="px-3 py-1 rounded border border-espn-border text-xs font-oswald uppercase tracking-wider text-gray-500 hover:text-white transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <span className="text-gray-600 text-xs font-inter">
+                            {item.email ? `Emails ${item.email}` : 'No email on file'}
+                          </span>
+                        </div>
+                      </div>
                     ) : item.id ? (
                       <button
-                        onClick={() => handleResolve(item.id!)}
-                        disabled={resolvingId === item.id}
-                        className="px-3 py-1 rounded border border-espn-border text-xs font-oswald uppercase tracking-wider text-gray-400 hover:text-gold hover:border-gold-dim transition-colors disabled:opacity-50"
+                        onClick={() => openForm(item.id!)}
+                        className="px-3 py-1 rounded border border-espn-border text-xs font-oswald uppercase tracking-wider text-gray-400 hover:text-gold hover:border-gold-dim transition-colors"
                       >
-                        {resolvingId === item.id ? 'Marking…' : 'Mark as fixed'}
+                        Fixed Issue
                       </button>
                     ) : null}
                   </div>

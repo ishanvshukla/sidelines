@@ -2,7 +2,8 @@ import type { Prefs } from '../types/news';
 import type { FeedbackCategoryId } from '../constants/feedback';
 
 export interface FeedbackItem {
-  // Absent on reports filed before ids/statuses existed
+  // Absent on reports filed before ids/statuses existed; the server backfills
+  // an id the first time the inbox is read, so this is only briefly undefined.
   id?: string;
   status?: 'open' | 'fixed';
   category: string;
@@ -11,6 +12,9 @@ export interface FeedbackItem {
   sports: string[];
   teams: Record<string, string[]>;
   created_at: string;
+  /** What the admin wrote when marking it fixed */
+  note?: string;
+  fixed_at?: string;
 }
 
 export interface FeedbackInbox {
@@ -50,12 +54,17 @@ export async function fetchFeedbackAccess(token: string): Promise<boolean> {
   }
 }
 
-/** Marks a report fixed; resolves to whether the reporter was emailed. */
-export async function resolveFeedback(token: string, id: string): Promise<boolean> {
+/** Marks a report fixed, optionally with a note included in the reporter's
+ *  email; resolves to whether that email actually went out. */
+export async function resolveFeedback(
+  token: string,
+  id: string,
+  note: string
+): Promise<boolean> {
   const res = await fetch('/api/feedback/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, note }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };

@@ -467,12 +467,49 @@ async def _send_email(to: str, subject: str, text: str) -> bool:
         return False
 
 
+# Reports filed before ids existed can't be resolved (nothing to address them
+# by), so they're given one on first read. Ids are generated in Python and
+# passed in, since Redis Lua has no dependable randomness; the script assigns
+# them only to entries actually missing an id, so it's idempotent and safe to
+# run against a list another request is pushing onto. Every stored entry is a
+# json.dumps object, so "^{" is always its opening brace.
+_BACKFILL_IDS_SCRIPT = """
+local items = redis.call('LRANGE', KEYS[1], 0, -1)
+local n = 0
+for i, raw in ipairs(items) do
+  if not string.find(raw, '"id": "', 1, true) then
+    n = n + 1
+    if ARGV[n] then
+      local patched = string.gsub(raw, '^{', '{"id": "' .. ARGV[n] .. '", "status": "open", ', 1)
+      redis.call('LSET', KEYS[1], i - 1, patched)
+    end
+  end
+end
+return n
+"""
+
+
+async def _backfill_report_ids(raw_items: list[str]) -> bool:
+    """Returns True if anything was patched (caller should re-read)."""
+    missing = sum(1 for raw in raw_items if '"id": "' not in raw)
+    if not missing:
+        return False
+    new_ids = [secrets.token_hex(8) for _ in range(missing)]
+    try:
+        await _redis("EVAL", _BACKFILL_IDS_SCRIPT, 1, FEEDBACK_KEY, *new_ids)
+    except httpx.HTTPError:
+        return False
+    return True
+
+
 async def feedback(request: Request) -> JSONResponse:
     if request.method == "GET":
         if not _is_admin(request):
             return JSONResponse({"error": "Forbidden"}, status_code=403)
         try:
             raw_items = await _redis("LRANGE", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1)
+            if await _backfill_report_ids(raw_items or []):
+                raw_items = await _redis("LRANGE", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1)
         except httpx.HTTPError:
             return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
         items = [json.loads(raw) for raw in raw_items or []]
@@ -548,18 +585,22 @@ async def feedback_access(request: Request) -> JSONResponse:
     return JSONResponse({"admin": _is_admin(request)})
 
 
-# Flips one report's status to "fixed" atomically, so a concurrent LPUSH can't
-# shift indices between finding the entry and LSET-ing it. Matching and the
-# status flip both work on the exact json.dumps byte sequences (quotes inside
-# a user's message are escaped as \" in storage, so neither needle can appear
-# inside one). Returns the entry as it was BEFORE the flip, so the caller can
-# tell an already-fixed report from a freshly fixed one.
+# Swaps one report for its resolved version atomically, so a concurrent LPUSH
+# can't shift indices between finding the entry and LSET-ing it. The entry is
+# located by the exact json.dumps byte sequence for its id (quotes inside a
+# user's message are escaped as \" in storage, so the needle can't appear
+# inside one). The write only happens if the entry is still open, so two
+# admins resolving at once can't clobber each other's note or double-email;
+# the pre-write entry is returned either way so the caller can tell which
+# case it got.
 _RESOLVE_SCRIPT = """
 local items = redis.call('LRANGE', KEYS[1], 0, -1)
 local needle = '"id": "' .. ARGV[1] .. '"'
 for i, raw in ipairs(items) do
   if string.find(raw, needle, 1, true) then
-    redis.call('LSET', KEYS[1], i - 1, (string.gsub(raw, '"status": "open"', '"status": "fixed"', 1)))
+    if string.find(raw, '"status": "open"', 1, true) then
+      redis.call('LSET', KEYS[1], i - 1, ARGV[2])
+    end
     return raw
   end
 end
@@ -578,27 +619,52 @@ async def resolve_feedback(request: Request) -> JSONResponse:
     report_id = str(body.get("id") or "")
     if len(report_id) != 16 or any(c not in "0123456789abcdef" for c in report_id):
         return JSONResponse({"error": "Invalid report id"}, status_code=400)
+    note = str(body.get("note") or "").strip()[:FEEDBACK_MAX_MESSAGE]
 
     try:
-        prev_raw = await _redis("EVAL", _RESOLVE_SCRIPT, 1, FEEDBACK_KEY, report_id)
+        raw_items = await _redis("LRANGE", FEEDBACK_KEY, 0, FEEDBACK_MAX_ENTRIES - 1)
+    except httpx.HTTPError:
+        return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
+
+    needle = f'"id": "{report_id}"'
+    current = next((json.loads(raw) for raw in raw_items or [] if needle in raw), None)
+    if current is None:
+        return JSONResponse({"error": "Report not found"}, status_code=404)
+
+    resolved = {
+        **current,
+        "status": "fixed",
+        "note": note,
+        "fixed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        prev_raw = await _redis(
+            "EVAL", _RESOLVE_SCRIPT, 1, FEEDBACK_KEY, report_id, json.dumps(resolved)
+        )
     except httpx.HTTPError:
         return JSONResponse({"error": "Datastore unreachable"}, status_code=502)
     if not prev_raw:
         return JSONResponse({"error": "Report not found"}, status_code=404)
 
-    # Notify the reporter — only on the first fix (not re-clicks), and only
-    # if they were signed in when they reported.
+    # Notify the reporter — only if this call is what actually closed the
+    # report (not a re-click or a race), and only if they were signed in when
+    # they reported, since an anonymous report has no address to reach.
     prev = json.loads(prev_raw)
+    if prev.get("status") != "open":
+        return JSONResponse({"ok": True, "notified": False, "alreadyFixed": True})
+
     notified = False
-    if prev.get("status") == "open" and prev.get("email"):
+    if prev.get("email"):
         label = FEEDBACK_CATEGORY_LABELS.get(prev.get("category"), prev.get("category"))
-        text = (
-            "Good news — the issue you reported on Sidelines has been fixed.\n\n"
-            f"Your report: {label}"
-            + (f'\n"{prev["message"]}"' if prev.get("message") else "")
-            + "\n\nThanks for helping make the site better!"
+        parts = ["Good news — the issue you reported on Sidelines has been fixed.", "", f"Your report: {label}"]
+        if prev.get("message"):
+            parts.append(f'"{prev["message"]}"')
+        if note:
+            parts += ["", "From the Sidelines team:", note]
+        parts += ["", "Thanks for helping make the site better!"]
+        notified = await _send_email(
+            prev["email"], "Your Sidelines report has been fixed", "\n".join(parts)
         )
-        notified = await _send_email(prev["email"], "Your Sidelines report has been fixed", text)
     return JSONResponse({"ok": True, "notified": notified})
 
 
